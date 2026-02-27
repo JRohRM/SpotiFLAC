@@ -21,26 +21,3 @@ services:
       # Mount your Navidrome music folder into the container.
       # Set MUSIC_DIR in .env to your actual host path.
       - ${MUSIC_DIR}:/music
-
-    networks:
-      - coolify   # Coolify's default Traefik network
-
-    labels:
-      - "traefik.enable=true"
-
-      # ── Router ──────────────────────────────────────────────────────────────
-      - "traefik.http.routers.spotiflac.rule=Host(`${DOMAIN}`) && PathPrefix(`/spotiflac`)"
-      - "traefik.http.routers.spotiflac.entrypoints=websecure"
-      - "traefik.http.routers.spotiflac.tls=true"
-      - "traefik.http.routers.spotiflac.tls.certresolver=${CERT_RESOLVER:-letsencrypt}"
-
-      # Strip the /spotiflac prefix before forwarding to the container
-      - "traefik.http.middlewares.spotiflac-strip.stripprefix.prefixes=/spotiflac"
-      - "traefik.http.routers.spotiflac.middlewares=spotiflac-strip@docker"
-
-      # ── Service ─────────────────────────────────────────────────────────────
-      - "traefik.http.services.spotiflac.loadbalancer.server.port=8080"
-
-networks:
-  proxy:
-    external: true
