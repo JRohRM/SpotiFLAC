@@ -9,13 +9,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/afkarxyz/SpotiFLAC/backend"
+	"github.com/google/uuid"
 )
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -33,6 +35,21 @@ func serverGetEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// normalizeSpotifyURL strips locale prefixes (intl-fr, intl-de, …) and
+// tracking query parameters (?si=…) so the metadata fetcher always receives
+// a clean canonical URL like https://open.spotify.com/track/<id>
+var localeRe = regexp.MustCompile(`/intl-[a-z]{2}/`)
+
+func normalizeSpotifyURL(raw string) string {
+	clean := localeRe.ReplaceAllString(raw, "/")
+	if u, err := url.Parse(clean); err == nil {
+		u.RawQuery = ""
+		u.Fragment = ""
+		clean = u.String()
+	}
+	return clean
 }
 
 // ── Job store ─────────────────────────────────────────────────────────────────
@@ -63,11 +80,11 @@ type jobStore struct {
 
 func newJobStore() *jobStore { return &jobStore{jobs: make(map[string]*Job)} }
 
-func (s *jobStore) create(url string) *Job {
+func (s *jobStore) create(spotURL string) *Job {
 	j := &Job{
 		ID:         uuid.New().String(),
 		Status:     StatusQueued,
-		SpotifyURL: url,
+		SpotifyURL: spotURL,
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
 	}
@@ -129,7 +146,9 @@ func runJob(store *jobStore, app *App, job *Job, service string, outputDir strin
 		return
 	}
 
+	// Log raw shape to help debug unexpected metadata structures
 	raw, _ := json.Marshal(metaData)
+	log.Printf("[%s] raw metadata: %s", job.ID, string(raw))
 
 	var envelope struct {
 		Track  *trackEnvItem  `json:"track"`
@@ -228,9 +247,9 @@ func withAuth(token string, next http.HandlerFunc) http.HandlerFunc {
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 func StartServer() {
-	apiToken  := serverMustEnv("API_TOKEN")
+	apiToken := serverMustEnv("API_TOKEN")
 	outputDir := serverMustEnv("OUTPUT_DIR")
-	port      := serverGetEnv("PORT", "8080")
+	port := serverGetEnv("PORT", "8080")
 
 	if err := backend.InitHistoryDB("SpotiFLAC"); err != nil {
 		log.Printf("warning: history DB init failed: %v", err)
@@ -264,6 +283,8 @@ func StartServer() {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "must be a spotify URL"})
 			return
 		}
+
+		body.URL = normalizeSpotifyURL(body.URL)
 		job := store.create(body.URL)
 		go runJob(store, app, job, body.Service, outputDir)
 		log.Printf("[%s] queued %s", job.ID, body.URL)
