@@ -18,6 +18,4 @@ services:
       PORT: ${PORT:-8080}
 
     volumes:
-      # Mount your Navidrome music folder into the container.
-      # Set MUSIC_DIR in .env to your actual host path.
-      - ${MUSIC_DIR}:/music
+      - /mnt/data/media/music:/music
