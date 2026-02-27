@@ -1,0 +1,47 @@
+services:
+  spotiflac:
+    build:
+      context: ../../Downloads
+      dockerfile: ../../Downloads/Dockerfile
+    container_name: spotiflac
+    restart: unless-stopped
+
+    environment:
+      # ── Required ────────────────────────────────────────────────────────────
+      # Secret token that must be sent as:  Authorization: Bearer <API_TOKEN>
+      API_TOKEN: ${API_TOKEN}
+
+      # Path INSIDE the container where FLACs are saved.
+      # Must match the target of the volume mount below.
+      OUTPUT_DIR: ${OUTPUT_DIR:-/music}
+
+      # ── Optional ────────────────────────────────────────────────────────────
+      PORT: ${PORT:-8080}
+
+    volumes:
+      # Mount your Navidrome music folder into the container.
+      # Set MUSIC_DIR in .env to your actual host path.
+      - ${MUSIC_DIR}:${OUTPUT_DIR:-/music}
+
+    networks:
+      - proxy   # the Traefik network — rename if yours is different
+
+    labels:
+      - "traefik.enable=true"
+
+      # ── Router ──────────────────────────────────────────────────────────────
+      - "traefik.http.routers.spotiflac.rule=Host(`${DOMAIN}`) && PathPrefix(`/spotiflac`)"
+      - "traefik.http.routers.spotiflac.entrypoints=websecure"
+      - "traefik.http.routers.spotiflac.tls=true"
+      - "traefik.http.routers.spotiflac.tls.certresolver=${CERT_RESOLVER:-letsencrypt}"
+
+      # Strip the /spotiflac prefix before forwarding to the container
+      - "traefik.http.middlewares.spotiflac-strip.stripprefix.prefixes=/spotiflac"
+      - "traefik.http.routers.spotiflac.middlewares=spotiflac-strip@docker"
+
+      # ── Service ─────────────────────────────────────────────────────────────
+      - "traefik.http.services.spotiflac.loadbalancer.server.port=8080"
+
+networks:
+  proxy:
+    external: true
