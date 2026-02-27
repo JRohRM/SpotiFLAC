@@ -23,7 +23,7 @@ services:
       - ${MUSIC_DIR}:/music
 
     networks:
-      - proxy   # the Traefik network — rename if yours is different
+      - coolify   # Coolify's default Traefik network
 
     labels:
       - "traefik.enable=true"
