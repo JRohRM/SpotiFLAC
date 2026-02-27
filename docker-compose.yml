@@ -1,8 +1,7 @@
 services:
   spotiflac:
     build:
-      context: ../../Downloads
-      dockerfile: ../../Downloads/Dockerfile
+      dockerfile: Dockerfile
     container_name: spotiflac
     restart: unless-stopped
 
