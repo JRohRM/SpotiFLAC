@@ -113,23 +113,21 @@ func (s *jobStore) update(id string, fn func(*Job)) {
 // ── Worker ────────────────────────────────────────────────────────────────────
 
 type trackEnvItem struct {
-	ID          string `json:"id"`
+	SpotifyID   string `json:"spotify_id"`
 	Name        string `json:"name"`
 	Artists     string `json:"artists"`
 	ISRC        string `json:"isrc"`
 	DurationMs  int    `json:"duration_ms"`
 	TrackNumber int    `json:"track_number"`
 	DiscNumber  int    `json:"disc_number"`
-	Album       struct {
-		Name        string `json:"name"`
-		Artist      string `json:"artist"`
-		ReleaseDate string `json:"release_date"`
-		CoverURL    string `json:"cover_url"`
-		TotalTracks int    `json:"total_tracks"`
-		TotalDiscs  int    `json:"total_discs"`
-		Copyright   string `json:"copyright"`
-		Publisher   string `json:"publisher"`
-	} `json:"album"`
+	TotalTracks int    `json:"total_tracks"`
+	TotalDiscs  int    `json:"total_discs"`
+	AlbumName   string `json:"album_name"`
+	AlbumArtist string `json:"album_artist"`
+	ReleaseDate string `json:"release_date"`
+	Images      string `json:"images"`
+	Copyright   string `json:"copyright"`
+	Publisher   string `json:"publisher"`
 }
 
 func runJob(store *jobStore, app *App, job *Job, service string, outputDir string) {
@@ -147,8 +145,8 @@ func runJob(store *jobStore, app *App, job *Job, service string, outputDir strin
 	}
 
 	// Log raw shape to help debug unexpected metadata structures
-	raw, _ := json.Marshal(metaData)
-	log.Printf("[%s] raw metadata: %s", job.ID, string(raw))
+	raw := []byte(metaData)
+	log.Printf("[%s] raw metadata: %s", job.ID, metaData)
 
 	var envelope struct {
 		Track  *trackEnvItem  `json:"track"`
@@ -178,13 +176,13 @@ func runJob(store *jobStore, app *App, job *Job, service string, outputDir strin
 
 	dlReq := DownloadRequest{
 		Service:            service,
-		SpotifyID:          t.ID,
+		SpotifyID:          t.SpotifyID,
 		TrackName:          t.Name,
 		ArtistName:         t.Artists,
-		AlbumName:          t.Album.Name,
-		AlbumArtist:        t.Album.Artist,
-		ReleaseDate:        t.Album.ReleaseDate,
-		CoverURL:           t.Album.CoverURL,
+		AlbumName:          t.AlbumName,
+		AlbumArtist:        t.AlbumArtist,
+		ReleaseDate:        t.ReleaseDate,
+		CoverURL:           t.Images,
 		Duration:           t.DurationMs,
 		OutputDir:          outputDir,
 		AudioFormat:        "LOSSLESS",
@@ -192,10 +190,10 @@ func runJob(store *jobStore, app *App, job *Job, service string, outputDir strin
 		AllowFallback:      true,
 		SpotifyTrackNumber: t.TrackNumber,
 		SpotifyDiscNumber:  t.DiscNumber,
-		SpotifyTotalTracks: t.Album.TotalTracks,
-		SpotifyTotalDiscs:  t.Album.TotalDiscs,
-		Copyright:          t.Album.Copyright,
-		Publisher:          t.Album.Publisher,
+		SpotifyTotalTracks: t.TotalTracks,
+		SpotifyTotalDiscs:  t.TotalDiscs,
+		Copyright:          t.Copyright,
+		Publisher:          t.Publisher,
 	}
 
 	resp, dlErr := app.DownloadTrack(dlReq)
