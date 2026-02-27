@@ -20,7 +20,7 @@ services:
     volumes:
       # Mount your Navidrome music folder into the container.
       # Set MUSIC_DIR in .env to your actual host path.
-      - ${MUSIC_DIR}:${OUTPUT_DIR:-/music}
+      - ${MUSIC_DIR}:/music
 
     networks:
       - proxy   # the Traefik network — rename if yours is different
