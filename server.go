@@ -68,6 +68,9 @@ type Job struct {
 	Status     JobStatus `json:"status"`
 	SpotifyURL string    `json:"spotify_url"`
 	Filename   string    `json:"filename,omitempty"`
+	Files      []string  `json:"files,omitempty"`
+	Total      int       `json:"total,omitempty"`
+	Done       int       `json:"done,omitempty"`
 	Error      string    `json:"error,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
@@ -149,8 +152,8 @@ func runJob(store *jobStore, app *App, job *Job, service string, outputDir strin
 	log.Printf("[%s] raw metadata: %s", job.ID, metaData)
 
 	var envelope struct {
-		Track  *trackEnvItem  `json:"track"`
-		Tracks []trackEnvItem `json:"tracks"`
+		Track     *trackEnvItem  `json:"track"`
+		TrackList []trackEnvItem `json:"track_list"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		jobFail(store, job, "could not parse metadata: "+err.Error())
@@ -161,58 +164,64 @@ func runJob(store *jobStore, app *App, job *Job, service string, outputDir strin
 	if envelope.Track != nil {
 		tracks = []trackEnvItem{*envelope.Track}
 	} else {
-		tracks = envelope.Tracks
+		tracks = envelope.TrackList
 	}
 	if len(tracks) == 0 {
 		jobFail(store, job, "no tracks found")
 		return
 	}
 
-	t := tracks[0]
-
 	if service == "" || service == "auto" {
 		service = "tidal"
 	}
 
-	dlReq := DownloadRequest{
-		Service:            service,
-		SpotifyID:          t.SpotifyID,
-		TrackName:          t.Name,
-		ArtistName:         t.Artists,
-		AlbumName:          t.AlbumName,
-		AlbumArtist:        t.AlbumArtist,
-		ReleaseDate:        t.ReleaseDate,
-		CoverURL:           t.Images,
-		Duration:           t.DurationMs,
-		OutputDir:          outputDir,
-		AudioFormat:        "LOSSLESS",
-		FilenameFormat:     "title-artist",
-		AllowFallback:      true,
-		SpotifyTrackNumber: t.TrackNumber,
-		SpotifyDiscNumber:  t.DiscNumber,
-		SpotifyTotalTracks: t.TotalTracks,
-		SpotifyTotalDiscs:  t.TotalDiscs,
-		Copyright:          t.Copyright,
-		Publisher:          t.Publisher,
-	}
+	store.update(job.ID, func(j *Job) { j.Total = len(tracks) })
 
-	resp, dlErr := app.DownloadTrack(dlReq)
-	if dlErr != nil || !resp.Success {
-		msg := ""
-		if dlErr != nil {
-			msg = dlErr.Error()
-		} else {
-			msg = resp.Error
+	for i, t := range tracks {
+		dlReq := DownloadRequest{
+			Service:            service,
+			SpotifyID:          t.SpotifyID,
+			TrackName:          t.Name,
+			ArtistName:         t.Artists,
+			AlbumName:          t.AlbumName,
+			AlbumArtist:        t.AlbumArtist,
+			ReleaseDate:        t.ReleaseDate,
+			CoverURL:           t.Images,
+			Duration:           t.DurationMs,
+			OutputDir:          outputDir,
+			AudioFormat:        "LOSSLESS",
+			FilenameFormat:     "title-artist",
+			AllowFallback:      true,
+			SpotifyTrackNumber: t.TrackNumber,
+			SpotifyDiscNumber:  t.DiscNumber,
+			SpotifyTotalTracks: t.TotalTracks,
+			SpotifyTotalDiscs:  t.TotalDiscs,
+			Copyright:          t.Copyright,
+			Publisher:          t.Publisher,
 		}
-		jobFail(store, job, "download failed: "+msg)
-		return
+
+		resp, dlErr := app.DownloadTrack(dlReq)
+		if dlErr != nil || !resp.Success {
+			msg := ""
+			if dlErr != nil {
+				msg = dlErr.Error()
+			} else {
+				msg = resp.Error
+			}
+			log.Printf("[%s] track %d/%d failed: %s", job.ID, i+1, len(tracks), msg)
+			continue
+		}
+
+		log.Printf("[%s] %d/%d done → %s", job.ID, i+1, len(tracks), resp.File)
+		store.update(job.ID, func(j *Job) {
+			j.Done++
+			j.Files = append(j.Files, resp.File)
+			j.Filename = resp.File
+		})
 	}
 
-	store.update(job.ID, func(j *Job) {
-		j.Status = StatusDone
-		j.Filename = resp.File
-	})
-	log.Printf("[%s] done → %s", job.ID, resp.File)
+	store.update(job.ID, func(j *Job) { j.Status = StatusDone })
+	log.Printf("[%s] all done", job.ID)
 }
 
 func jobFail(store *jobStore, job *Job, msg string) {
