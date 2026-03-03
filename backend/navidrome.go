@@ -215,8 +215,8 @@ func (c *NavidromeClient) SetPlaylistCover(playlistID, imageURL string) error {
 	}
 	mw.Close()
 
-	// POST to Navidrome's native playlist image endpoint.
-	req, err := http.NewRequest(http.MethodPost,
+	// PUT to Navidrome's native playlist image endpoint.
+	req, err := http.NewRequest(http.MethodPut,
 		fmt.Sprintf("%s/api/playlist/%s/image", c.BaseURL, playlistID),
 		&body,
 	)
@@ -236,7 +236,8 @@ func (c *NavidromeClient) SetPlaylistCover(playlistID, imageURL string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("upload returned HTTP %d", resp.StatusCode)
+		rbody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("upload returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(rbody)))
 	}
 	return nil
 }
