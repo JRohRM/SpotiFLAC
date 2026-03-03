@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strings"
@@ -184,17 +183,14 @@ func (c *NavidromeClient) SetPlaylistCover(playlistID, imageURL string) error {
 		return fmt.Errorf("read cover: %w", err)
 	}
 
-	// Determine file extension from the response content-type.
+	// Detect the image content-type from the response header or the bytes.
 	ct := imgResp.Header.Get("Content-Type")
 	if ct == "" {
 		ct = http.DetectContentType(imgData)
 	}
-	ext := "jpg"
-	switch {
-	case strings.Contains(ct, "png"):
-		ext = "png"
-	case strings.Contains(ct, "webp"):
-		ext = "webp"
+	// Normalise to a plain MIME type (strip parameters like charset).
+	if i := strings.Index(ct, ";"); i != -1 {
+		ct = strings.TrimSpace(ct[:i])
 	}
 
 	// Authenticate with Navidrome's native REST API.
@@ -203,22 +199,11 @@ func (c *NavidromeClient) SetPlaylistCover(playlistID, imageURL string) error {
 		return err
 	}
 
-	// Build multipart form body.
-	var body bytes.Buffer
-	mw := multipart.NewWriter(&body)
-	fw, err := mw.CreateFormFile("image", "cover."+ext)
-	if err != nil {
-		return fmt.Errorf("form: %w", err)
-	}
-	if _, err := fw.Write(imgData); err != nil {
-		return fmt.Errorf("form write: %w", err)
-	}
-	mw.Close()
-
-	// PUT to Navidrome's native playlist image endpoint.
+	// PUT the raw image bytes directly — Navidrome's image endpoint is
+	// registered with Consumes(image/*), so multipart/form-data returns 404.
 	req, err := http.NewRequest(http.MethodPut,
 		fmt.Sprintf("%s/api/playlist/%s/image", c.BaseURL, playlistID),
-		&body,
+		bytes.NewReader(imgData),
 	)
 	if err != nil {
 		return err
@@ -228,7 +213,7 @@ func (c *NavidromeClient) SetPlaylistCover(playlistID, imageURL string) error {
 	// X-ND-Authorization as a proxy-safe alternative.
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-ND-Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Content-Type", ct)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
