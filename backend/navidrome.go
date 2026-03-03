@@ -149,10 +149,15 @@ func (c *NavidromeClient) nativeToken() (string, error) {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("auth: server returned %d: %s", resp.StatusCode, string(body))
+	}
+
 	var result struct {
 		Token string `json:"token"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return "", fmt.Errorf("auth parse: %w", err)
 	}
 	if result.Token == "" {
@@ -218,7 +223,11 @@ func (c *NavidromeClient) SetPlaylistCover(playlistID, imageURL string) error {
 	if err != nil {
 		return err
 	}
+	// Send both headers: Traefik and other reverse proxies often strip the
+	// standard Authorization header, so Navidrome also accepts
+	// X-ND-Authorization as a proxy-safe alternative.
 	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-ND-Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 
 	resp, err := c.client.Do(req)
