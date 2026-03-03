@@ -166,9 +166,11 @@ func runJob(store *jobStore, app *App, job *Job, service string, outputDir strin
 			Owner struct {
 				Name string `json:"name"`
 			} `json:"owner"`
+			Cover string `json:"cover"`
 		} `json:"playlist_info"`
 		AlbumInfo *struct {
-			Name string `json:"name"`
+			Name  string `json:"name"`
+			Cover string `json:"cover"`
 		} `json:"album_info"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil {
@@ -291,6 +293,22 @@ func runJob(store *jobStore, app *App, job *Job, service string, outputDir strin
 		} else {
 			log.Printf("[%s] navidrome: playlist created (id=%s)", job.ID, plID)
 			store.update(job.ID, func(j *Job) { j.NavidromePlaylistID = plID })
+
+			// Migrate cover art if available.
+			coverURL := ""
+			if envelope.PlaylistInfo != nil {
+				coverURL = envelope.PlaylistInfo.Cover
+			} else if envelope.AlbumInfo != nil {
+				coverURL = envelope.AlbumInfo.Cover
+			}
+			if coverURL != "" {
+				log.Printf("[%s] navidrome: uploading cover art", job.ID)
+				if err := nc.SetPlaylistCover(plID, coverURL); err != nil {
+					log.Printf("[%s] navidrome: cover upload failed: %s", job.ID, err)
+				} else {
+					log.Printf("[%s] navidrome: cover uploaded", job.ID)
+				}
+			}
 		}
 	}
 }

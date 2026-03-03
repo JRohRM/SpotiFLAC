@@ -1,10 +1,13 @@
 package backend
 
 import (
+	"bytes"
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strings"
@@ -132,6 +135,101 @@ func (c *NavidromeClient) SearchSong(title, artist string) (string, error) {
 		return song.ID, nil
 	}
 	return "", nil
+}
+
+// nativeToken authenticates with Navidrome's native REST API and returns a JWT.
+func (c *NavidromeClient) nativeToken() (string, error) {
+	payload, _ := json.Marshal(map[string]string{
+		"username": c.Username,
+		"password": c.Password,
+	})
+	resp, err := c.client.Post(c.BaseURL+"/auth/login", "application/json", bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("auth: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("auth parse: %w", err)
+	}
+	if result.Token == "" {
+		return "", fmt.Errorf("auth: empty token in response")
+	}
+	return result.Token, nil
+}
+
+// SetPlaylistCover downloads imageURL and uploads it as the playlist's cover art
+// using Navidrome's native REST API.
+func (c *NavidromeClient) SetPlaylistCover(playlistID, imageURL string) error {
+	if imageURL == "" {
+		return nil
+	}
+
+	// Download the cover image.
+	imgResp, err := c.client.Get(imageURL)
+	if err != nil {
+		return fmt.Errorf("download cover: %w", err)
+	}
+	defer imgResp.Body.Close()
+	imgData, err := io.ReadAll(imgResp.Body)
+	if err != nil {
+		return fmt.Errorf("read cover: %w", err)
+	}
+
+	// Determine file extension from the response content-type.
+	ct := imgResp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = http.DetectContentType(imgData)
+	}
+	ext := "jpg"
+	switch {
+	case strings.Contains(ct, "png"):
+		ext = "png"
+	case strings.Contains(ct, "webp"):
+		ext = "webp"
+	}
+
+	// Authenticate with Navidrome's native REST API.
+	token, err := c.nativeToken()
+	if err != nil {
+		return err
+	}
+
+	// Build multipart form body.
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, err := mw.CreateFormFile("image", "cover."+ext)
+	if err != nil {
+		return fmt.Errorf("form: %w", err)
+	}
+	if _, err := fw.Write(imgData); err != nil {
+		return fmt.Errorf("form write: %w", err)
+	}
+	mw.Close()
+
+	// POST to Navidrome's native playlist image endpoint.
+	req, err := http.NewRequest(http.MethodPost,
+		fmt.Sprintf("%s/api/playlist/%s/image", c.BaseURL, playlistID),
+		&body,
+	)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("upload: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("upload returned HTTP %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // CreatePlaylist creates a new playlist in Navidrome and returns its ID.
