@@ -64,16 +64,24 @@ const (
 )
 
 type Job struct {
-	ID         string    `json:"id"`
-	Status     JobStatus `json:"status"`
-	SpotifyURL string    `json:"spotify_url"`
-	Filename   string    `json:"filename,omitempty"`
-	Files      []string  `json:"files,omitempty"`
-	Total      int       `json:"total,omitempty"`
-	Done       int       `json:"done,omitempty"`
-	Error      string    `json:"error,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID                  string    `json:"id"`
+	Status              JobStatus `json:"status"`
+	SpotifyURL          string    `json:"spotify_url"`
+	Filename            string    `json:"filename,omitempty"`
+	Files               []string  `json:"files,omitempty"`
+	Total               int       `json:"total,omitempty"`
+	Done                int       `json:"done,omitempty"`
+	Error               string    `json:"error,omitempty"`
+	NavidromePlaylistID string    `json:"navidrome_playlist_id,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+type navidromeConfig struct {
+	URL          string
+	Username     string
+	Password     string
+	PlaylistName string
 }
 
 type jobStore struct {
@@ -133,7 +141,7 @@ type trackEnvItem struct {
 	Publisher   string `json:"publisher"`
 }
 
-func runJob(store *jobStore, app *App, job *Job, service string, outputDir string) {
+func runJob(store *jobStore, app *App, job *Job, service string, outputDir string, naviCfg *navidromeConfig) {
 	store.update(job.ID, func(j *Job) { j.Status = StatusProcessing })
 
 	metaReq := SpotifyMetadataRequest{
@@ -152,8 +160,16 @@ func runJob(store *jobStore, app *App, job *Job, service string, outputDir strin
 	log.Printf("[%s] raw metadata: %s", job.ID, metaData)
 
 	var envelope struct {
-		Track     *trackEnvItem  `json:"track"`
-		TrackList []trackEnvItem `json:"track_list"`
+		Track        *trackEnvItem  `json:"track"`
+		TrackList    []trackEnvItem `json:"track_list"`
+		PlaylistInfo *struct {
+			Owner struct {
+				Name string `json:"name"`
+			} `json:"owner"`
+		} `json:"playlist_info"`
+		AlbumInfo *struct {
+			Name string `json:"name"`
+		} `json:"album_info"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		jobFail(store, job, "could not parse metadata: "+err.Error())
@@ -222,6 +238,61 @@ func runJob(store *jobStore, app *App, job *Job, service string, outputDir strin
 
 	store.update(job.ID, func(j *Job) { j.Status = StatusDone })
 	log.Printf("[%s] all done", job.ID)
+
+	if naviCfg != nil {
+		nc := backend.NewNavidromeClient(naviCfg.URL, naviCfg.Username, naviCfg.Password)
+
+		log.Printf("[%s] navidrome: starting library scan", job.ID)
+		if err := nc.StartScan(); err != nil {
+			log.Printf("[%s] navidrome: scan start failed: %s", job.ID, err)
+		} else {
+			log.Printf("[%s] navidrome: waiting for scan to finish…", job.ID)
+			if err := nc.WaitForScan(5 * time.Minute); err != nil {
+				log.Printf("[%s] navidrome: %s", job.ID, err)
+			}
+		}
+
+		var songIDs []string
+		for _, t := range tracks {
+			id, err := nc.SearchSong(t.Name, t.Artists)
+			if err != nil {
+				log.Printf("[%s] navidrome: search failed for %q: %s", job.ID, t.Name, err)
+				continue
+			}
+			if id != "" {
+				songIDs = append(songIDs, id)
+				log.Printf("[%s] navidrome: found %q → %s", job.ID, t.Name, id)
+			} else {
+				log.Printf("[%s] navidrome: not found: %q by %s", job.ID, t.Name, t.Artists)
+			}
+		}
+
+		if len(songIDs) == 0 {
+			log.Printf("[%s] navidrome: no songs found, skipping playlist creation", job.ID)
+			return
+		}
+
+		playlistName := naviCfg.PlaylistName
+		if playlistName == "" && envelope.PlaylistInfo != nil {
+			playlistName = envelope.PlaylistInfo.Owner.Name
+		}
+		if playlistName == "" && envelope.AlbumInfo != nil {
+			playlistName = envelope.AlbumInfo.Name
+		}
+		if playlistName == "" {
+			playlistName = "SpotiFLAC Import"
+		}
+
+		log.Printf("[%s] navidrome: creating playlist %q with %d/%d songs",
+			job.ID, playlistName, len(songIDs), len(tracks))
+		plID, err := nc.CreatePlaylist(playlistName, songIDs)
+		if err != nil {
+			log.Printf("[%s] navidrome: create playlist failed: %s", job.ID, err)
+		} else {
+			log.Printf("[%s] navidrome: playlist created (id=%s)", job.ID, plID)
+			store.update(job.ID, func(j *Job) { j.NavidromePlaylistID = plID })
+		}
+	}
 }
 
 func jobFail(store *jobStore, job *Job, msg string) {
@@ -279,8 +350,14 @@ func StartServer() {
 			return
 		}
 		var body struct {
-			URL     string `json:"url"`
-			Service string `json:"service"`
+			URL       string `json:"url"`
+			Service   string `json:"service"`
+			Navidrome *struct {
+				URL          string `json:"url"`
+				Username     string `json:"username"`
+				Password     string `json:"password"`
+				PlaylistName string `json:"playlist_name"`
+			} `json:"navidrome"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.URL == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "json body with url required"})
@@ -291,9 +368,19 @@ func StartServer() {
 			return
 		}
 
+		var naviCfg *navidromeConfig
+		if body.Navidrome != nil && body.Navidrome.URL != "" && body.Navidrome.Username != "" {
+			naviCfg = &navidromeConfig{
+				URL:          body.Navidrome.URL,
+				Username:     body.Navidrome.Username,
+				Password:     body.Navidrome.Password,
+				PlaylistName: body.Navidrome.PlaylistName,
+			}
+		}
+
 		body.URL = normalizeSpotifyURL(body.URL)
 		job := store.create(body.URL)
-		go runJob(store, app, job, body.Service, outputDir)
+		go runJob(store, app, job, body.Service, outputDir, naviCfg)
 		log.Printf("[%s] queued %s", job.ID, body.URL)
 		writeJSON(w, http.StatusAccepted, map[string]string{
 			"job_id": job.ID,
