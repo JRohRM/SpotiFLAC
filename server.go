@@ -301,6 +301,7 @@ func runJob(store *jobStore, app *App, job *Job, service string, outputDir strin
 			} else if envelope.AlbumInfo != nil {
 				coverURL = envelope.AlbumInfo.Cover
 			}
+			log.Printf("[%s] navidrome: cover url: %s", coverURL)
 			if coverURL != "" {
 				log.Printf("[%s] navidrome: uploading cover art", job.ID)
 				if err := nc.SetPlaylistCover(plID, coverURL); err != nil {
