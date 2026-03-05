@@ -216,10 +216,12 @@ func (c *NavidromeClient) SetPlaylistCover(playlistID, imageURL string) error {
 	mw.Close()
 
 	// POST to Navidrome's native playlist image endpoint.
-	req, err := http.NewRequest(http.MethodPost,
-		fmt.Sprintf("%s/api/playlist/%s/image", c.BaseURL, playlistID),
-		&body,
-	)
+	// Pass the token both as a Bearer header and as a query parameter so that
+	// it survives any reverse-proxy redirect that would otherwise strip the
+	// Authorization header.
+	reqURL := fmt.Sprintf("%s/api/playlist/%s/image?token=%s",
+		c.BaseURL, playlistID, url.QueryEscape(token))
+	req, err := http.NewRequest(http.MethodPost, reqURL, &body)
 	if err != nil {
 		return err
 	}
