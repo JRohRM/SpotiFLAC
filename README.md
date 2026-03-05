@@ -1,95 +1,210 @@
-# SpotiFLAC
+# SpotiFLAC — Server
 
-<a href="https://trendshift.io/repositories/15737" target="_blank"><img src="https://trendshift.io/api/badge/repositories/15737" alt="afkarxyz%2FSpotiFLAC | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+Download Spotify tracks, albums, and playlists as true FLAC via Tidal, Qobuz, Amazon Music, or Deezer. Runs as a headless HTTP API in Docker.
 
-Get Spotify tracks in true FLAC from Tidal, Qobuz, Amazon Music & Deezer — no account required.
+---
 
-![Windows](https://img.shields.io/badge/Windows-10%2B-0078D6?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiB2aWV3Qm94PSIwIDAgMjAgMjAiPjxwYXRoIGZpbGw9IiNmZmZmZmYiIGZpbGwtcnVsZT0iZXZlbm9kZCIgZD0iTTIwIDEwLjg3M1YyMEw4LjQ3OSAxOC41MzdsLjAwMS03LjY2NEgyMFptLTEzLjEyIDBsLS4wMDEgNy40NjFMMCAxNy40NjF2LTYuNTg4aDYuODhaTTIwIDkuMjczSDguNDhsLS4wMDEtNy44MUwyMCAwdjkuMjczWk02Ljg3OSAxLjY2NmwuMDAxIDcuNjA3SDBWMi41MzlsNi44NzktLjg3M1oiLz48L3N2Zz4=)
-![macOS](https://img.shields.io/badge/macOS-10.13%2B-000000?style=for-the-badge&logo=apple&logoColor=white)
-![Linux](https://img.shields.io/badge/Linux-Any-FCC624?style=for-the-badge&logo=linux&logoColor=white)
-[![Telegram Channel](https://img.shields.io/badge/CHANNEL-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/spotiflac)
-[![Telegram Community](https://img.shields.io/badge/COMMUNITY-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/spotiflac_chat)
+## Setup
 
-### [Download](https://github.com/afkarxyz/SpotiFLAC/releases)
+### 1. Configure the environment
 
-## Screenshot
+Create a `.env` file next to `docker-compose.yml`:
 
-![Image](https://github.com/user-attachments/assets/adbdc056-bace-44a9-8ba6-898b4526b65a)
+```env
+# Required — token clients must send as: Authorization: Bearer <value>
+API_TOKEN=changeme
 
-## Other projects
+# Path inside the container where FLACs are written.
+# Must match the volume mount target below.
+OUTPUT_DIR=/music
 
-### [SpotiFLAC Next](https://github.com/spotiverse/SpotiFLAC-Next)
+# Optional — defaults to 8080
+PORT=8080
+```
 
-Get Spotify tracks in Hi-Res lossless FLACs — no account required.
+### 2. Edit the volume mount
 
-### [SpotiDownloader](https://github.com/afkarxyz/SpotiDownloader)
+Open `docker-compose.yml` and set the host path on the left side of the volume to wherever your music library lives:
 
-Get Spotify tracks in MP3 and FLAC via spotidownloader.com
+```yaml
+volumes:
+  - /your/music/library:/music
+```
 
-### [SpotubeDL](https://spotubedl.com)
+### 3. Start the container
 
-Download Spotify Tracks, Albums, Playlists as MP3/OGG/Opus with High Quality.
+```bash
+docker compose up -d
+```
 
-### [SpotiFLAC (Mobile)](https://github.com/zarzet/SpotiFLAC-Mobile)
+The server is ready when you see:
 
-SpotiFLAC for Android & iOS — maintained by [@zarzet](https://github.com/zarzet)
+```
+spotiflac-server on :8080  output→/music
+```
 
-## FAQ
+---
 
-### Is this software free?
+## API
 
-_Yes. This software is completely free.
-You do not need an account, login, or subscription.
-All you need is an internet connection._
+All endpoints except `/health` require the header:
 
-### Can using this software get my Spotify account suspended or banned?
+```
+Authorization: Bearer <API_TOKEN>
+```
 
-_No.
-This software has no connection to your Spotify account.
-Spotify data is obtained through reverse engineering of the Spotify Web Player, not through user authentication._
+### `POST /download`
 
-### Where does the audio come from?
+Queue a download job. Returns immediately with a job ID.
 
-_The audio is fetched using third-party APIs._
+**Request body**
 
-### Why does metadata fetching sometimes fail?
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `url` | string | yes | Spotify URL (track, album, or playlist) |
+| `service` | string | no | Source service: `tidal`, `qobuz`, `amazon`, `deezer`. Defaults to `tidal` |
+| `navidrome` | object | no | See [Navidrome integration](#navidrome-integration) |
 
-_This usually happens because your IP address has been rate-limited.
-You can wait and try again later, or use a VPN to bypass the rate limit._
+**Response**
 
-### Why does Windows Defender or antivirus flag or delete the file?
+```json
+{
+  "job_id": "d290f1ee-6c54-4b01-90e6-d701748f0851",
+  "status": "queued"
+}
+```
 
-_This is a false positive.
-It likely happens because the executable is compressed using UPX._
+**Examples**
 
-_If you are concerned, you can fork the repository and build the software yourself from source._
+Single track:
+```bash
+curl -X POST http://localhost:8080/download \
+  -H "Authorization: Bearer changeme" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
+  }'
+```
 
-### Want to support the project?
+Full playlist via Qobuz:
+```bash
+curl -X POST http://localhost:8080/download \
+  -H "Authorization: Bearer changeme" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M",
+    "service": "qobuz"
+  }'
+```
 
-_If this software is useful and brings you value,
-consider supporting the project by buying me a coffee.
-Your support helps keep development going._
+---
 
-[![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/afkarxyz)
+### `GET /status/{job_id}`
+
+Poll the status of a queued or completed job.
+
+**Response fields**
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Job UUID |
+| `status` | string | `queued` · `processing` · `done` · `failed` |
+| `spotify_url` | string | Normalized input URL |
+| `total` | int | Total tracks in the request |
+| `done` | int | Tracks successfully downloaded so far |
+| `files` | string[] | Absolute container paths of downloaded files |
+| `filename` | string | Path of the last downloaded file |
+| `error` | string | Present only when `status` is `failed` |
+| `navidrome_playlist_id` | string | Set when a Navidrome playlist was created (see below) |
+| `created_at` | string | ISO 8601 timestamp |
+| `updated_at` | string | ISO 8601 timestamp |
+
+**Example**
+
+```bash
+curl http://localhost:8080/status/d290f1ee-6c54-4b01-90e6-d701748f0851 \
+  -H "Authorization: Bearer changeme"
+```
+
+```json
+{
+  "id": "d290f1ee-6c54-4b01-90e6-d701748f0851",
+  "status": "done",
+  "spotify_url": "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M",
+  "total": 50,
+  "done": 50,
+  "files": [
+    "/music/Blinding Lights - The Weeknd.flac",
+    "/music/Levitating - Dua Lipa.flac"
+  ],
+  "created_at": "2025-01-15T12:00:00Z",
+  "updated_at": "2025-01-15T12:04:32Z"
+}
+```
+
+---
+
+### `GET /health`
+
+No authentication required. Returns `200 OK` when the server is running.
+
+```json
+{ "status": "ok" }
+```
+
+---
+
+## Navidrome integration
+
+When downloading a playlist or album, you can pass Navidrome credentials and SpotiFLAC will automatically create the playlist in your Navidrome library after the download finishes.
+
+**What happens:**
+1. All tracks are downloaded to the output directory
+2. A Navidrome library scan is triggered and waited on (up to 5 minutes)
+3. Each track is searched in Navidrome by title and artist
+4. A playlist is created with all found tracks
+
+**`navidrome` object fields**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `url` | string | yes | Base URL of your Navidrome instance |
+| `username` | string | yes | Navidrome username |
+| `password` | string | yes | Navidrome password |
+| `playlist_name` | string | no | Override the playlist name. Defaults to the Spotify playlist/album name |
+
+**Example**
+
+```bash
+curl -X POST http://localhost:8080/download \
+  -H "Authorization: Bearer changeme" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M",
+    "service": "tidal",
+    "navidrome": {
+      "url": "http://navidrome.example.com",
+      "username": "admin",
+      "password": "secret"
+    }
+  }'
+```
+
+Once the job completes, `GET /status/{job_id}` will include:
+
+```json
+{
+  "status": "done",
+  "navidrome_playlist_id": "42"
+}
+```
+
+> Navidrome failures (wrong credentials, scan timeout, songs not yet indexed) are logged server-side but do not fail the job — downloaded files are always kept.
+
+---
 
 ## Disclaimer
 
 This project is for **educational and private use only**. The developer does not condone or encourage copyright infringement.
 
-**SpotiFLAC** is a third-party tool and is not affiliated with, endorsed by, or connected to Spotify, Tidal, Qobuz, Amazon Music, Deezer or any other streaming service.
-
-You are solely responsible for:
-
-1. Ensuring your use of this software complies with your local laws.
-2. Reading and adhering to the Terms of Service of the respective platforms.
-3. Any legal consequences resulting from the misuse of this tool.
-
-The software is provided "as is", without warranty of any kind. The author assumes no liability for any bans, damages, or legal issues arising from its use.
-
-## API Credits
-
-[MusicBrainz](https://musicbrainz.org) · [Spotify Lyrics API](https://github.akashrchandran.in/spotify-lyrics-api) · [LRCLIB](https://lrclib.net) · [Song.link](https://song.link) · [hifi-api](https://github.com/binimum/hifi-api) · [dabmusic.xyz](https://dabmusic.xyz) · [yoinkify.lol](https://github.com/chasemarshall/yoink)
-
-> [!TIP]
->
-> **Star Us**, You will receive all release notifications from GitHub without any delay ~
+**SpotiFLAC** is not affiliated with, endorsed by, or connected to Spotify, Tidal, Qobuz, Amazon Music, Deezer, or any other streaming service. You are solely responsible for ensuring your use complies with your local laws and the Terms of Service of the respective platforms.
