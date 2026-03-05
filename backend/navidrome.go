@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strings"
@@ -148,15 +149,10 @@ func (c *NavidromeClient) nativeToken() (string, error) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("auth: server returned %d: %s", resp.StatusCode, string(body))
-	}
-
 	var result struct {
 		Token string `json:"token"`
 	}
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", fmt.Errorf("auth parse: %w", err)
 	}
 	if result.Token == "" {
@@ -183,14 +179,17 @@ func (c *NavidromeClient) SetPlaylistCover(playlistID, imageURL string) error {
 		return fmt.Errorf("read cover: %w", err)
 	}
 
-	// Detect the image content-type from the response header or the bytes.
+	// Determine file extension from the response content-type.
 	ct := imgResp.Header.Get("Content-Type")
 	if ct == "" {
 		ct = http.DetectContentType(imgData)
 	}
-	// Normalise to a plain MIME type (strip parameters like charset).
-	if i := strings.Index(ct, ";"); i != -1 {
-		ct = strings.TrimSpace(ct[:i])
+	ext := "jpg"
+	switch {
+	case strings.Contains(ct, "png"):
+		ext = "png"
+	case strings.Contains(ct, "webp"):
+		ext = "webp"
 	}
 
 	// Authenticate with Navidrome's native REST API.
@@ -199,21 +198,28 @@ func (c *NavidromeClient) SetPlaylistCover(playlistID, imageURL string) error {
 		return err
 	}
 
-	// PUT the raw image bytes directly — Navidrome's image endpoint is
-	// registered with Consumes(image/*), so multipart/form-data returns 404.
-	req, err := http.NewRequest(http.MethodPut,
+	// Build multipart form body.
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, err := mw.CreateFormFile("image", "cover."+ext)
+	if err != nil {
+		return fmt.Errorf("form: %w", err)
+	}
+	if _, err := fw.Write(imgData); err != nil {
+		return fmt.Errorf("form write: %w", err)
+	}
+	mw.Close()
+
+	// POST to Navidrome's native playlist image endpoint.
+	req, err := http.NewRequest(http.MethodPost,
 		fmt.Sprintf("%s/api/playlist/%s/image", c.BaseURL, playlistID),
-		bytes.NewReader(imgData),
+		&body,
 	)
 	if err != nil {
 		return err
 	}
-	// Send both headers: Traefik and other reverse proxies often strip the
-	// standard Authorization header, so Navidrome also accepts
-	// X-ND-Authorization as a proxy-safe alternative.
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("X-ND-Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", ct)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -221,8 +227,7 @@ func (c *NavidromeClient) SetPlaylistCover(playlistID, imageURL string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		rbody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("upload returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(rbody)))
+		return fmt.Errorf("upload returned HTTP %d", resp.StatusCode)
 	}
 	return nil
 }
