@@ -149,6 +149,10 @@ func (c *NavidromeClient) nativeToken() (string, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("auth: server returned HTTP %d", resp.StatusCode)
+	}
+
 	var result struct {
 		Token string `json:"token"`
 	}
