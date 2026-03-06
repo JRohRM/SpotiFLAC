@@ -285,13 +285,32 @@ func runJob(store *jobStore, app *App, job *Job, service string, outputDir strin
 			playlistName = "SpotiFLAC Import"
 		}
 
-		log.Printf("[%s] navidrome: creating playlist %q with %d/%d songs",
-			job.ID, playlistName, len(songIDs), len(tracks))
-		plID, err := nc.CreatePlaylist(playlistName, songIDs)
+		existingID, err := nc.FindPlaylistByName(playlistName)
 		if err != nil {
-			log.Printf("[%s] navidrome: create playlist failed: %s", job.ID, err)
+			log.Printf("[%s] navidrome: playlist lookup failed: %s", job.ID, err)
+		}
+
+		var plID string
+		if existingID != "" {
+			log.Printf("[%s] navidrome: updating existing playlist %q (id=%s) with %d/%d songs",
+				job.ID, playlistName, existingID, len(songIDs), len(tracks))
+			if err := nc.UpdatePlaylist(existingID, songIDs); err != nil {
+				log.Printf("[%s] navidrome: update playlist failed: %s", job.ID, err)
+			} else {
+				plID = existingID
+				log.Printf("[%s] navidrome: playlist updated (id=%s)", job.ID, plID)
+			}
 		} else {
-			log.Printf("[%s] navidrome: playlist created (id=%s)", job.ID, plID)
+			log.Printf("[%s] navidrome: creating playlist %q with %d/%d songs",
+				job.ID, playlistName, len(songIDs), len(tracks))
+			plID, err = nc.CreatePlaylist(playlistName, songIDs)
+			if err != nil {
+				log.Printf("[%s] navidrome: create playlist failed: %s", job.ID, err)
+			} else {
+				log.Printf("[%s] navidrome: playlist created (id=%s)", job.ID, plID)
+			}
+		}
+		if plID != "" {
 			store.update(job.ID, func(j *Job) { j.NavidromePlaylistID = plID })
 
 			// Migrate cover art if available.
