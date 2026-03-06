@@ -67,6 +67,12 @@ type subsonicResponse struct {
 		Playlist *struct {
 			ID string `json:"id"`
 		} `json:"playlist"`
+		Playlists *struct {
+			Playlist []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"playlist"`
+		} `json:"playlists"`
 	} `json:"subsonic-response"`
 }
 
@@ -135,6 +141,47 @@ func (c *NavidromeClient) SearchSong(title, artist string) (string, error) {
 		return song.ID, nil
 	}
 	return "", nil
+}
+
+// GetPlaylists returns all playlists visible to the authenticated user.
+func (c *NavidromeClient) GetPlaylists() ([]struct{ ID, Name string }, error) {
+	result, err := c.call("getPlaylists", nil)
+	if err != nil {
+		return nil, err
+	}
+	if result.Response.Playlists == nil {
+		return nil, nil
+	}
+	out := make([]struct{ ID, Name string }, 0, len(result.Response.Playlists.Playlist))
+	for _, p := range result.Response.Playlists.Playlist {
+		out = append(out, struct{ ID, Name string }{p.ID, p.Name})
+	}
+	return out, nil
+}
+
+// FindPlaylistByName returns the ID of the first playlist whose name exactly
+// matches name, or "" if none is found.
+func (c *NavidromeClient) FindPlaylistByName(name string) (string, error) {
+	playlists, err := c.GetPlaylists()
+	if err != nil {
+		return "", err
+	}
+	for _, p := range playlists {
+		if p.Name == name {
+			return p.ID, nil
+		}
+	}
+	return "", nil
+}
+
+// UpdatePlaylist replaces the song list of an existing playlist.
+func (c *NavidromeClient) UpdatePlaylist(playlistID string, songIDs []string) error {
+	params := url.Values{"playlistId": {playlistID}}
+	for _, id := range songIDs {
+		params.Add("songId", id)
+	}
+	_, err := c.call("createPlaylist", params)
+	return err
 }
 
 // nativeToken authenticates with Navidrome's native REST API and returns a JWT.
