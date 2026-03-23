@@ -112,7 +112,7 @@ func (a *App) GetStreamingURLs(spotifyTrackID string, region string) (string, er
 	}
 
 	fmt.Printf("[GetStreamingURLs] Called for track ID: %s, Region: %s\n", spotifyTrackID, region)
-	client := backend.NewSongLinkClient()
+	client := backend.SharedSongLinkClient()
 	urls, err := client.GetAllURLsFromSpotify(spotifyTrackID, region)
 	if err != nil {
 		return "", err
@@ -360,7 +360,7 @@ func (a *App) DownloadTrack(req DownloadRequest) (DownloadResponse, error) {
 
 		if req.Service == "qobuz" {
 			go func() {
-				client := backend.NewSongLinkClient()
+				client := backend.SharedSongLinkClient()
 				isrc, _ := client.GetISRC(req.SpotifyID)
 				isrcChan <- isrc
 			}()
@@ -1023,7 +1023,7 @@ func (a *App) CheckTrackAvailability(spotifyTrackID string) (string, error) {
 		return "", fmt.Errorf("spotify track ID is required")
 	}
 
-	client := backend.NewSongLinkClient()
+	client := backend.SharedSongLinkClient()
 	availability, err := client.CheckTrackAvailability(spotifyTrackID)
 	if err != nil {
 		return "", err

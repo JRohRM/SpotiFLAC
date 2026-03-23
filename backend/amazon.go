@@ -297,7 +297,7 @@ func (a *AmazonDownloader) DownloadByURL(amazonURL, outputDir, quality, filename
 			if len(parts) > 0 {
 				sID := strings.Split(parts[len(parts)-1], "?")[0]
 				if sID != "" {
-					client := NewSongLinkClient()
+					client := SharedSongLinkClient()
 					if val, err := client.GetISRC(sID); err == nil {
 						isrc = val
 					}

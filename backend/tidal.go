@@ -91,69 +91,8 @@ func (t *TidalDownloader) GetAvailableAPIs() ([]string, error) {
 }
 
 func (t *TidalDownloader) GetTidalURLFromSpotify(spotifyTrackID string) (tidalURL, deezerURL string, err error) {
-
-	spotifyBase := "https://open.spotify.com/track/"
-	spotifyURL := fmt.Sprintf("%s%s", spotifyBase, spotifyTrackID)
-
-	apiBase := "https://api.song.link/v1-alpha.1/links?url="
-	apiURL := fmt.Sprintf("%s%s", apiBase, url.QueryEscape(spotifyURL))
-
-	req, err := http.NewRequest("GET", apiURL, nil)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
-
 	fmt.Println("Getting Tidal URL...")
-
-	maxRetries := 3
-	var resp *http.Response
-	for i := 0; i < maxRetries; i++ {
-		resp, err = t.client.Do(req)
-		if err != nil {
-			return "", "", fmt.Errorf("failed to get Tidal URL: %w", err)
-		}
-		if resp.StatusCode == 429 {
-			resp.Body.Close()
-			if i < maxRetries-1 {
-				waitTime := 15 * time.Second
-				fmt.Printf("Rate limited by API, waiting %v before retry...\n", waitTime)
-				time.Sleep(waitTime)
-				continue
-			}
-			return "", "", fmt.Errorf("API returned status %d", resp.StatusCode)
-		}
-		if resp.StatusCode != 200 {
-			resp.Body.Close()
-			return "", "", fmt.Errorf("API returned status %d", resp.StatusCode)
-		}
-		break
-	}
-	defer resp.Body.Close()
-
-	var songLinkResp struct {
-		LinksByPlatform map[string]struct {
-			URL string `json:"url"`
-		} `json:"linksByPlatform"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&songLinkResp); err != nil {
-		return "", "", fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	tidalLink, ok := songLinkResp.LinksByPlatform["tidal"]
-	if !ok || tidalLink.URL == "" {
-		return "", "", fmt.Errorf("tidal link not found")
-	}
-
-	tidalURL = tidalLink.URL
-	fmt.Printf("Found Tidal URL: %s\n", tidalURL)
-
-	if deezerLink, ok := songLinkResp.LinksByPlatform["deezer"]; ok && deezerLink.URL != "" {
-		deezerURL = deezerLink.URL
-	}
-
-	return tidalURL, deezerURL, nil
+	return SharedSongLinkClient().GetTidalAndDeezerURLs(spotifyTrackID)
 }
 
 func (t *TidalDownloader) GetTrackIDFromURL(tidalURL string) (int64, error) {
@@ -541,7 +480,7 @@ func (t *TidalDownloader) DownloadByURL(tidalURL, outputDir, quality, filenameFo
 				if len(parts) > 0 {
 					sID := strings.Split(parts[len(parts)-1], "?")[0]
 					if sID != "" {
-						client := NewSongLinkClient()
+						client := SharedSongLinkClient()
 						if val, err := client.GetISRC(sID); err == nil {
 							isrc = val
 						}
@@ -705,7 +644,7 @@ func (t *TidalDownloader) DownloadByURLWithFallback(tidalURL, outputDir, quality
 				if len(parts) > 0 {
 					sID := strings.Split(parts[len(parts)-1], "?")[0]
 					if sID != "" {
-						client := NewSongLinkClient()
+						client := SharedSongLinkClient()
 						if val, err := client.GetISRC(sID); err == nil {
 							isrc = val
 						}
