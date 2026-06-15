@@ -4,8 +4,9 @@ import { Download, FolderOpen, CheckCircle, XCircle, FileText, FileCheck, Globe,
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger, } from "@/components/ui/tooltip";
 import type { TrackMetadata, TrackAvailability } from "@/types/api";
-import { TidalIcon, QobuzIcon, AmazonIcon } from "./PlatformIcons";
 import { usePreview } from "@/hooks/usePreview";
+import { AvailabilityLinks, hasAvailabilityLinks } from "./AvailabilityLinks";
+import { buildClickableArtists, getClickableArtistKey } from "@/lib/artist-links";
 interface TrackInfoProps {
     track: TrackMetadata & {
         album_name: string;
@@ -31,10 +32,22 @@ interface TrackInfoProps {
     onCheckAvailability?: (spotifyId: string) => void;
     onDownloadCover?: (coverUrl: string, trackName: string, artistName: string, albumName?: string, playlistName?: string, position?: number, trackId?: string, albumArtist?: string, releaseDate?: string, discNumber?: number) => void;
     onOpenFolder: () => void;
+    onAlbumClick?: (album: {
+        id: string;
+        name: string;
+        external_urls: string;
+    }) => void;
+    onArtistClick?: (artist: {
+        id: string;
+        name: string;
+        external_urls: string;
+    }) => void;
     onBack?: () => void;
 }
-export function TrackInfo({ track, isDownloading, downloadingTrack, isDownloaded, isFailed, isSkipped, downloadingLyricsTrack, downloadedLyrics, failedLyrics, skippedLyrics, checkingAvailability, availability, downloadingCover, downloadedCover, failedCover, skippedCover, onDownload, onDownloadLyrics, onCheckAvailability, onDownloadCover, onOpenFolder, onBack, }: TrackInfoProps) {
+export function TrackInfo({ track, isDownloading, downloadingTrack, isDownloaded, isFailed, isSkipped, downloadingLyricsTrack, downloadedLyrics, failedLyrics, skippedLyrics, checkingAvailability, availability, downloadingCover, downloadedCover, failedCover, skippedCover, onDownload, onDownloadLyrics, onCheckAvailability, onDownloadCover, onOpenFolder, onAlbumClick, onArtistClick, onBack, }: TrackInfoProps) {
     const { playPreview, loadingPreview, playingTrack } = usePreview();
+    const hasAlbumClick = !!(onAlbumClick && track.album_id && track.album_url);
+    const clickableArtists = buildClickableArtists(track.artists, track.artists_data, track.artist_id, track.artist_url);
     const formatDuration = (ms: number) => {
         const minutes = Math.floor(ms / 60000);
         const seconds = Math.floor((ms % 60000) / 1000);
@@ -69,13 +82,30 @@ export function TrackInfo({ track, isDownloading, downloadingTrack, isDownloaded
               {track.is_explicit && (<span className="inline-flex items-center justify-center bg-red-600 text-white text-[10px] h-4 w-4 rounded shrink-0" title="Explicit">E</span>)}
               {isSkipped ? (<FileCheck className="h-6 w-6 text-yellow-500 shrink-0"/>) : isDownloaded ? (<CheckCircle className="h-6 w-6 text-green-500 shrink-0"/>) : isFailed ? (<XCircle className="h-6 w-6 text-red-500 shrink-0"/>) : null}
             </div>
-            <p className="text-lg text-muted-foreground">{track.artists}</p>
+            <p className="text-lg text-muted-foreground">
+              {clickableArtists.length > 0 ? clickableArtists.map((artist, index) => (<span key={getClickableArtistKey(artist)}>
+                    {onArtistClick ? (<button type="button" className="cursor-pointer rounded-sm bg-transparent p-0 text-inherit hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60" onClick={() => onArtistClick({
+                    id: artist.id,
+                    name: artist.name,
+                    external_urls: artist.external_urls,
+                })}>
+                        {artist.name}
+                      </button>) : (artist.name)}
+                    {index < clickableArtists.length - 1 && ", "}
+                  </span>)) : track.artists}
+            </p>
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div className="space-y-1">
               <div>
                 <p className="text-xs text-muted-foreground">Album</p>
-                <p className="font-medium truncate">{track.album_name}</p>
+                <p className="font-medium truncate">{hasAlbumClick ? (<button type="button" className="cursor-pointer rounded-sm bg-transparent p-0 text-left text-inherit hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60" onClick={() => onAlbumClick?.({
+                id: track.album_id!,
+                name: track.album_name,
+                external_urls: track.album_url!,
+            })}>
+                    {track.album_name}
+                  </button>) : (track.album_name)}</p>
               </div>
               {track.plays && (<div>
                 <p className="text-xs text-muted-foreground">Total Plays</p>
@@ -135,21 +165,23 @@ export function TrackInfo({ track, isDownloading, downloadingTrack, isDownloaded
             {track.spotify_id && onCheckAvailability && (<Tooltip>
               <TooltipTrigger asChild>
                 <Button onClick={() => onCheckAvailability(track.spotify_id!)} variant="outline" size="icon" disabled={checkingAvailability}>
-                  {checkingAvailability ? (<Spinner />) : availability ? (<CheckCircle className="h-4 w-4 text-green-500"/>) : (<Globe className="h-4 w-4"/>)}
+                  {checkingAvailability ? (<Spinner />) : availability ? (hasAvailabilityLinks(availability) ? (<CheckCircle className="h-4 w-4 text-green-500"/>) : (<XCircle className="h-4 w-4 text-red-500"/>)) : (<Globe className="h-4 w-4"/>)}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className="pointer-events-auto">
+                <AvailabilityLinks availability={availability}/>
+              </TooltipContent>
+            </Tooltip>)}
+            {isDownloaded && (<Tooltip>
+              <TooltipTrigger asChild>
+                <Button onClick={onOpenFolder} variant="outline" size="icon">
+                  <FolderOpen className="h-4 w-4"/>
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                  {availability ? (<div className="flex items-center gap-2">
-                  <TidalIcon className={`w-4 h-4 ${availability.tidal ? "text-green-500" : "text-red-500"}`}/>
-                  <QobuzIcon className={`w-4 h-4 ${availability.qobuz ? "text-green-500" : "text-red-500"}`}/>
-                  <AmazonIcon className={`w-4 h-4 ${availability.amazon ? "text-green-500" : "text-red-500"}`}/>
-                </div>) : (<p>Check Availability</p>)}
+                <p>Open Folder</p>
               </TooltipContent>
             </Tooltip>)}
-            {isDownloaded && (<Button onClick={onOpenFolder} variant="outline">
-              <FolderOpen className="h-4 w-4"/>
-              Open Folder
-            </Button>)}
           </div>)}
         </div>
       </div>

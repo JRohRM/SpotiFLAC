@@ -4,12 +4,16 @@ export interface DownloadProgressInfo {
     is_downloading: boolean;
     mb_downloaded: number;
     speed_mbps: number;
+    rate_limited?: boolean;
+    rate_limit_secs?: number;
 }
 export function useDownloadProgress() {
     const [progress, setProgress] = useState<DownloadProgressInfo>({
         is_downloading: false,
         mb_downloaded: 0,
         speed_mbps: 0,
+        rate_limited: false,
+        rate_limit_secs: 0,
     });
     const intervalRef = useRef<number | null>(null);
     useEffect(() => {

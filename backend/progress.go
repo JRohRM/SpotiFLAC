@@ -41,6 +41,9 @@ var (
 	currentSpeed        float64
 	speedLock           sync.RWMutex
 
+	rateLimitUntilMs int64
+	rateLimitLock    sync.RWMutex
+
 	downloadQueue       []DownloadItem
 	downloadQueueLock   sync.RWMutex
 	currentItemID       string
@@ -55,6 +58,8 @@ type ProgressInfo struct {
 	IsDownloading bool    `json:"is_downloading"`
 	MBDownloaded  float64 `json:"mb_downloaded"`
 	SpeedMBps     float64 `json:"speed_mbps"`
+	RateLimited   bool    `json:"rate_limited"`
+	RateLimitSecs int     `json:"rate_limit_secs"`
 }
 
 type DownloadQueueInfo struct {
@@ -82,11 +87,43 @@ func GetDownloadProgress() ProgressInfo {
 	speed := currentSpeed
 	speedLock.RUnlock()
 
+	rateLimitLock.RLock()
+	untilMs := rateLimitUntilMs
+	rateLimitLock.RUnlock()
+
+	rateLimited := false
+	rateLimitSecs := 0
+	if untilMs > 0 {
+		remainingMs := untilMs - getCurrentTimeMillis()
+		if remainingMs > 0 {
+			rateLimited = true
+			rateLimitSecs = int((remainingMs + 999) / 1000)
+		}
+	}
+
 	return ProgressInfo{
 		IsDownloading: downloading,
 		MBDownloaded:  progress,
 		SpeedMBps:     speed,
+		RateLimited:   rateLimited,
+		RateLimitSecs: rateLimitSecs,
 	}
+}
+
+func SetRateLimitCooldown(seconds float64) {
+	rateLimitLock.Lock()
+	if seconds <= 0 {
+		rateLimitUntilMs = 0
+	} else {
+		rateLimitUntilMs = getCurrentTimeMillis() + int64(seconds*1000)
+	}
+	rateLimitLock.Unlock()
+}
+
+func ClearRateLimitCooldown() {
+	rateLimitLock.Lock()
+	rateLimitUntilMs = 0
+	rateLimitLock.Unlock()
 }
 
 func SetDownloadSpeed(mbps float64) {
@@ -110,6 +147,7 @@ func SetDownloading(downloading bool) {
 
 		SetDownloadProgress(0)
 		SetDownloadSpeed(0)
+		ClearRateLimitCooldown()
 	}
 }
 
@@ -147,6 +185,10 @@ func getCurrentTimeMillis() int64 {
 }
 
 func (pw *ProgressWriter) Write(p []byte) (int, error) {
+	if err := CheckDownloadCancelled(); err != nil {
+		return 0, err
+	}
+
 	n, err := pw.writer.Write(p)
 	pw.total += int64(n)
 
@@ -394,6 +436,25 @@ func CancelAllQueuedItems() {
 			downloadQueue[i].ErrorMessage = "Cancelled"
 		}
 	}
+}
+
+func CancelQueuedAndDownloadingItems() {
+	downloadQueueLock.Lock()
+	for i := range downloadQueue {
+		if downloadQueue[i].Status == StatusQueued || downloadQueue[i].Status == StatusDownloading {
+			downloadQueue[i].Status = StatusSkipped
+			downloadQueue[i].EndTime = time.Now().Unix()
+			downloadQueue[i].ErrorMessage = "Cancelled"
+		}
+	}
+	downloadQueueLock.Unlock()
+
+	currentItemLock.Lock()
+	currentItemID = ""
+	currentItemLock.Unlock()
+
+	SetDownloadProgress(0)
+	SetDownloadSpeed(0)
 }
 
 func ResetSessionIfComplete() {

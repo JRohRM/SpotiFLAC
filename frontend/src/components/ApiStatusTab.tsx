@@ -1,74 +1,91 @@
-import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, CheckCircle2, XCircle, Loader2 } from "lucide-react";
-import { CheckAPIStatus } from "../../wailsjs/go/main/App";
-import { TidalIcon, QobuzIcon, AmazonIcon } from "./PlatformIcons";
-interface ApiSource {
-    id: string;
-    type: string;
-    name: string;
-    url: string;
+import { PlugZap, CheckCircle2, Loader2, Wrench, Server } from "lucide-react";
+import { TidalIcon, QobuzIcon, AmazonIcon, AppleMusicIcon, DeezerIcon } from "./PlatformIcons";
+import { useApiStatus } from "@/hooks/useApiStatus";
+import { SPOTIFLAC_NEXT_SOURCES } from "@/lib/api-status";
+import { openExternal } from "@/lib/utils";
+function renderStatusIndicator(status: "checking" | "online" | "offline" | "idle") {
+    if (status === "online") {
+        return <CheckCircle2 className="h-5 w-5 text-emerald-500"/>;
+    }
+    if (status === "offline") {
+        return <Wrench className="h-4 w-4 text-amber-600 dark:text-amber-400"/>;
+    }
+    return null;
 }
-const SOURCES: ApiSource[] = [
-    { id: "tidal1", type: "tidal", name: "Tidal A", url: "https://hifi-one.spotisaver.net" },
-    { id: "tidal2", type: "tidal", name: "Tidal B", url: "https://hifi-two.spotisaver.net" },
-    { id: "tidal3", type: "tidal", name: "Tidal C", url: "https://eu-central.monochrome.tf" },
-    { id: "tidal4", type: "tidal", name: "Tidal D", url: "https://us-west.monochrome.tf" },
-    { id: "tidal5", type: "tidal", name: "Tidal E", url: "https://api.monochrome.tf" },
-    { id: "tidal6", type: "tidal", name: "Tidal F", url: "https://monochrome-api.samidy.com" },
-    { id: "tidal7", type: "tidal", name: "Tidal G", url: "https://tidal.kinoplus.online" },
-    { id: "qobuz1", type: "qobuz", name: "Qobuz A", url: "https://dab.yeet.su" },
-    { id: "qobuz2", type: "qobuz", name: "Qobuz B", url: "https://dabmusic.xyz" },
-    { id: "qobuz3", type: "qbz", name: "Qobuz C", url: "https://qbz.afkarxyz.fun" },
-    { id: "amazon1", type: "amazon", name: "Amazon Music", url: "https://amzn.afkarxyz.fun" },
-];
+function renderPlatformIcon(type: string) {
+    if (type === "tidal") {
+        return <TidalIcon className="w-5 h-5 shrink-0 text-muted-foreground"/>;
+    }
+    if (type === "amazon") {
+        return <AmazonIcon className="w-5 h-5 shrink-0 text-muted-foreground"/>;
+    }
+    if (type === "deezer") {
+        return <DeezerIcon className="w-5 h-5 shrink-0 text-muted-foreground"/>;
+    }
+    if (type === "apple") {
+        return <AppleMusicIcon className="w-5 h-5 shrink-0 text-muted-foreground"/>;
+    }
+    return <QobuzIcon className="w-5 h-5 shrink-0 text-muted-foreground"/>;
+}
 export function ApiStatusTab() {
-    const [statuses, setStatuses] = useState<Record<string, "checking" | "online" | "offline" | "idle">>({});
-    const [isCheckingAll, setIsCheckingAll] = useState(false);
-    const checkStatus = async (sourceId: string, apiType: string, url: string) => {
-        setStatuses(prev => ({ ...prev, [sourceId]: "checking" }));
-        try {
-            const isOnline = await CheckAPIStatus(apiType, url);
-            setStatuses(prev => ({ ...prev, [sourceId]: isOnline ? "online" : "offline" }));
-        }
-        catch (error) {
-            setStatuses(prev => ({ ...prev, [sourceId]: "offline" }));
-        }
+    const { sources, statuses, nextStatuses, checkingSources, checkAllCurrent, checkAllNext } = useApiStatus();
+    const isCheckingCurrent = sources.some((source) => checkingSources[source.id] === true);
+    const isCheckingNext = SPOTIFLAC_NEXT_SOURCES.some((source) => nextStatuses[source.id] === "checking");
+    const isChecking = isCheckingCurrent || isCheckingNext;
+    const checkAll = () => {
+        void checkAllCurrent();
+        void checkAllNext();
     };
-    const checkAll = async () => {
-        setIsCheckingAll(true);
-        const promises = SOURCES.map(s => checkStatus(s.id, s.type, s.url));
-        await Promise.allSettled(promises);
-        setIsCheckingAll(false);
-    };
-    useEffect(() => {
-        checkAll();
-    }, []);
     return (<div className="space-y-6">
-      <div className="flex items-center justify-end">
-        <Button variant="outline" onClick={checkAll} disabled={isCheckingAll} className="gap-2">
-          <RefreshCw className={`h-4 w-4 ${isCheckingAll ? "animate-spin" : ""}`}/>
-          Refresh All
-        </Button>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold tracking-tight">SpotiFLAC</h3>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => openExternal("https://spotbye.qzz.io")} className="gap-2">
+              <Server className="h-4 w-4"/>
+              Details
+            </Button>
+            <Button variant="outline" size="sm" onClick={checkAll} disabled={isChecking} className="gap-2">
+              {isChecking ? <Loader2 className="h-4 w-4 animate-spin"/> : <PlugZap className="h-4 w-4"/>}
+              Check
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {sources.map((source) => {
+            const status = statuses[source.id] || "idle";
+            return (<div key={source.id} className="space-y-4 p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    {renderPlatformIcon(source.type)}
+                    <p className="font-medium leading-none">{source.name}</p>
+                  </div>
+                  <div className="flex items-center">{renderStatusIndicator(status)}</div>
+                </div>
+              </div>);
+        })}
+        </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
-        {SOURCES.map((source) => {
-            const status = statuses[source.id] || "idle";
+      <div className="border-t"/>
+
+      <div className="space-y-4">
+        <h3 className="text-sm font-semibold tracking-tight">SpotiFLAC Next</h3>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+          {SPOTIFLAC_NEXT_SOURCES.map((source) => {
+            const status = nextStatuses[source.id] || "idle";
             return (<div key={source.id} className="flex items-center justify-between p-4 border rounded-lg bg-card text-card-foreground shadow-sm">
               <div className="flex items-center gap-3">
-                {source.type === "tidal" ? <TidalIcon className="w-5 h-5 shrink-0 text-muted-foreground"/> : source.type === "amazon" ? <AmazonIcon className="w-5 h-5 shrink-0 text-muted-foreground"/> : <QobuzIcon className="w-5 h-5 shrink-0 text-muted-foreground"/>}
+                {renderPlatformIcon(source.id)}
                 <p className="font-medium leading-none">{source.name}</p>
               </div>
-              
-              <div className="flex items-center">
-                {status === "checking" && <Loader2 className="h-5 w-5 animate-spin text-muted-foreground"/>}
-                {status === "online" && <CheckCircle2 className="h-5 w-5 text-emerald-500"/>}
-                {status === "offline" && <XCircle className="h-5 w-5 text-destructive"/>}
-                {status === "idle" && <div className="h-5 w-5 rounded-full bg-muted"/>}
-              </div>
+              <div className="flex items-center">{renderStatusIndicator(status)}</div>
             </div>);
         })}
+        </div>
       </div>
     </div>);
 }

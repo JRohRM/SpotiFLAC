@@ -3,7 +3,6 @@ package backend
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"time"
@@ -22,6 +21,7 @@ type HistoryItem struct {
 	Quality     string `json:"quality"`
 	Format      string `json:"format"`
 	Path        string `json:"path"`
+	Source      string `json:"source"`
 	Timestamp   int64  `json:"timestamp"`
 }
 
@@ -34,12 +34,9 @@ const (
 
 func InitHistoryDB(appName string) error {
 
-	appDir, err := GetFFmpegDir()
+	appDir, err := EnsureAppDir()
 	if err != nil {
 		return err
-	}
-	if _, err := os.Stat(appDir); os.IsNotExist(err) {
-		os.MkdirAll(appDir, 0755)
 	}
 	dbPath := filepath.Join(appDir, "history.db")
 
@@ -152,14 +149,15 @@ func ClearHistory(appName string) error {
 }
 
 type FetchHistoryItem struct {
-	ID        string `json:"id"`
-	URL       string `json:"url"`
-	Type      string `json:"type"`
-	Name      string `json:"name"`
-	Info      string `json:"info"`
-	Image     string `json:"image"`
-	Data      string `json:"data"`
-	Timestamp int64  `json:"timestamp"`
+	ID         string `json:"id"`
+	URL        string `json:"url"`
+	Type       string `json:"type"`
+	Name       string `json:"name"`
+	Info       string `json:"info"`
+	Image      string `json:"image"`
+	Data       string `json:"data"`
+	IsExplicit bool   `json:"is_explicit,omitempty"`
+	Timestamp  int64  `json:"timestamp"`
 }
 
 const (

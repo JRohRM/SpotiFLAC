@@ -13,6 +13,7 @@ import (
 	"github.com/go-flac/flacpicture"
 	"github.com/go-flac/flacvorbis"
 	"github.com/go-flac/go-flac"
+	"golang.org/x/text/unicode/norm"
 )
 
 type Metadata struct {
@@ -20,6 +21,7 @@ type Metadata struct {
 	Artist      string
 	Album       string
 	AlbumArtist string
+	Separator   string
 	Date        string
 	ReleaseDate string
 	TrackNumber int
@@ -27,12 +29,74 @@ type Metadata struct {
 	DiscNumber  int
 	TotalDiscs  int
 	URL         string
+	Comment     string
 	Copyright   string
 	Publisher   string
+	Composer    string
 	Lyrics      string
 	Description string
 	ISRC        string
+	UPC         string
 	Genre       string
+}
+
+func resolveMetadataSeparator(separator string) string {
+	if normalized := normalizeArtistSeparator(separator); normalized != "" {
+		return normalized
+	}
+
+	return normalizeArtistSeparator(GetSeparator())
+}
+
+func displayMetadataSeparator(separator string) string {
+	if resolved := resolveMetadataSeparator(separator); resolved != "" {
+		return resolved + " "
+	}
+
+	return "; "
+}
+
+func addVorbisTagValues(cmt *flacvorbis.MetaDataBlockVorbisComment, key string, values []string) {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+
+		_ = cmt.Add(key, value)
+	}
+}
+
+func addMP3TextFrame(tag *id3v2.Tag, frameID string, value string) {
+	tag.DeleteFrames(frameID)
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+
+	tag.AddTextFrame(frameID, id3v2.EncodingUTF8, value)
+}
+
+func joinMultiValueText(values []string, separator string, nullSeparated bool) string {
+	cleaned := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			cleaned = append(cleaned, value)
+		}
+	}
+
+	if len(cleaned) == 0 {
+		return ""
+	}
+	if len(cleaned) == 1 {
+		return cleaned[0]
+	}
+	if nullSeparated {
+		return strings.Join(cleaned, "\x00")
+	}
+
+	return strings.Join(cleaned, displayMetadataSeparator(separator))
 }
 
 func EmbedMetadata(filepath string, metadata Metadata, coverPath string) error {
@@ -50,17 +114,22 @@ func EmbedMetadata(filepath string, metadata Metadata, coverPath string) error {
 	}
 
 	cmt := flacvorbis.New()
+	separator := resolveMetadataSeparator(metadata.Separator)
 
 	if metadata.Title != "" {
 		_ = cmt.Add(flacvorbis.FIELD_TITLE, metadata.Title)
 	}
-	if metadata.Artist != "" {
+	if artistValues := SplitArtistCredits(metadata.Artist, separator); len(artistValues) > 0 {
+		addVorbisTagValues(cmt, flacvorbis.FIELD_ARTIST, artistValues)
+	} else if metadata.Artist != "" {
 		_ = cmt.Add(flacvorbis.FIELD_ARTIST, metadata.Artist)
 	}
 	if metadata.Album != "" {
 		_ = cmt.Add(flacvorbis.FIELD_ALBUM, metadata.Album)
 	}
-	if metadata.AlbumArtist != "" {
+	if albumArtistValues := SplitArtistCredits(metadata.AlbumArtist, separator); len(albumArtistValues) > 0 {
+		addVorbisTagValues(cmt, "ALBUMARTIST", albumArtistValues)
+	} else if metadata.AlbumArtist != "" {
 		_ = cmt.Add("ALBUMARTIST", metadata.AlbumArtist)
 	}
 	if metadata.Date != "" {
@@ -84,15 +153,28 @@ func EmbedMetadata(filepath string, metadata Metadata, coverPath string) error {
 	if metadata.Publisher != "" {
 		_ = cmt.Add("PUBLISHER", metadata.Publisher)
 	}
+	if composerValues := SplitArtistCredits(metadata.Composer, separator); len(composerValues) > 0 {
+		addVorbisTagValues(cmt, "COMPOSER", composerValues)
+	} else if metadata.Composer != "" {
+		_ = cmt.Add("COMPOSER", metadata.Composer)
+	}
 	if metadata.Description != "" {
 		_ = cmt.Add("DESCRIPTION", metadata.Description)
+	}
+	if comment := resolveMetadataComment(metadata); comment != "" {
+		_ = cmt.Add("COMMENT", comment)
 	}
 
 	if metadata.ISRC != "" {
 		_ = cmt.Add("ISRC", metadata.ISRC)
 	}
+	if metadata.UPC != "" {
+		_ = cmt.Add(preferredUPCTagKey, metadata.UPC)
+	}
 
-	if metadata.Genre != "" {
+	if genreValues := SplitMetadataValues(metadata.Genre, separator); len(genreValues) > 0 {
+		addVorbisTagValues(cmt, "GENRE", genreValues)
+	} else if metadata.Genre != "" {
 		_ = cmt.Add("GENRE", metadata.Genre)
 	}
 
@@ -165,6 +247,14 @@ func extractYear(releaseDate string) string {
 	return releaseDate
 }
 
+func resolveMetadataComment(metadata Metadata) string {
+	if comment := strings.TrimSpace(metadata.Comment); comment != "" {
+		return comment
+	}
+
+	return strings.TrimSpace(metadata.URL)
+}
+
 func EmbedLyricsOnly(filepath string, lyrics string) error {
 	if lyrics == "" {
 		return nil
@@ -218,16 +308,68 @@ func EmbedLyricsOnly(filepath string, lyrics string) error {
 }
 
 func ExtractCoverArt(filePath string) (string, error) {
+	filePath = norm.NFC.String(filePath)
 	ext := strings.ToLower(pathfilepath.Ext(filePath))
+
+	var coverPath string
+	var err error
 
 	switch ext {
 	case ".mp3":
-		return extractCoverFromMp3(filePath)
+		coverPath, err = extractCoverFromMp3(filePath)
 	case ".m4a", ".flac":
-		return extractCoverFromM4AOrFlac(filePath)
+		coverPath, err = extractCoverFromM4AOrFlac(filePath)
 	default:
 		return "", fmt.Errorf("unsupported file format: %s", ext)
 	}
+
+	if err != nil || coverPath == "" {
+		fmt.Printf("[ExtractCoverArt] Library extraction failed for %s, trying FFmpeg fallback...\n", filePath)
+		ffmpegCover, ffmpegErr := extractCoverWithFFmpeg(filePath)
+		if ffmpegErr == nil {
+			return ffmpegCover, nil
+		}
+		return coverPath, err
+	}
+
+	return coverPath, nil
+}
+
+func extractCoverWithFFmpeg(filePath string) (string, error) {
+	ffmpegPath, err := GetFFmpegPath()
+	if err != nil {
+		return "", err
+	}
+
+	tmpFile, err := os.CreateTemp("", "cover-*.jpg")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+
+	cmd := exec.Command(ffmpegPath,
+		"-i", filePath,
+		"-an",
+		"-vframes", "1",
+		"-f", "image2",
+		"-update", "1",
+		"-y",
+		tmpPath,
+	)
+
+	setHideWindow(cmd)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("ffmpeg cover extraction failed: %v, output: %s", err, string(output))
+	}
+
+	if info, err := os.Stat(tmpPath); err != nil || info.Size() == 0 {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("ffmpeg produced empty cover file")
+	}
+
+	return tmpPath, nil
 }
 
 func extractCoverFromMp3(filePath string) (string, error) {
@@ -298,19 +440,71 @@ func extractCoverFromM4AOrFlac(filePath string) (string, error) {
 }
 
 func ExtractLyrics(filePath string) (string, error) {
+	filePath = norm.NFC.String(filePath)
 	ext := strings.ToLower(pathfilepath.Ext(filePath))
+
+	var lyrics string
+	var err error
 
 	switch ext {
 	case ".mp3":
-		return extractLyricsFromMp3(filePath)
+		lyrics, err = extractLyricsFromMp3(filePath)
 	case ".flac":
-		return extractLyricsFromFlac(filePath)
+		lyrics, err = extractLyricsFromFlac(filePath)
 	case ".m4a":
-
 		return "", nil
 	default:
 		return "", fmt.Errorf("unsupported file format: %s", ext)
 	}
+
+	if (err != nil || lyrics == "") && ext != ".m4a" {
+		fmt.Printf("[ExtractLyrics] Library extraction failed for %s, trying ffprobe fallback...\n", filePath)
+		ffprobeLyrics, ffprobeErr := extractLyricsWithFFprobe(filePath)
+		if ffprobeErr == nil && ffprobeLyrics != "" {
+			return ffprobeLyrics, nil
+		}
+	}
+
+	return lyrics, err
+}
+
+func extractLyricsWithFFprobe(filePath string) (string, error) {
+	ffprobePath, err := GetFFprobePath()
+	if err != nil {
+		return "", err
+	}
+
+	cmd := exec.Command(ffprobePath,
+		"-v", "quiet",
+		"-show_entries", "format_tags=lyrics:format_tags=unsyncedlyrics:format_tags=lyric",
+		"-of", "json",
+		filePath,
+	)
+
+	setHideWindow(cmd)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+
+	var result struct {
+		Format struct {
+			Tags map[string]string `json:"tags"`
+		} `json:"format"`
+	}
+
+	if err := json.Unmarshal(output, &result); err != nil {
+		return "", err
+	}
+
+	tags := result.Format.Tags
+	for _, key := range []string{"lyrics", "unsyncedlyrics", "lyric", "LYRICS", "UNSYNCEDLYRICS", "LYRIC"} {
+		if val, ok := tags[key]; ok && val != "" {
+			return val, nil
+		}
+	}
+
+	return "", nil
 }
 
 func extractLyricsFromMp3(filePath string) (string, error) {
@@ -688,6 +882,7 @@ func parseLRCTimestamp(timestamp string) int64 {
 }
 
 func ExtractFullMetadataFromFile(filePath string) (Metadata, error) {
+	filePath = norm.NFC.String(filePath)
 	var metadata Metadata
 
 	ffprobePath, err := GetFFprobePath()
@@ -783,19 +978,32 @@ func ExtractFullMetadataFromFile(filePath string) (Metadata, error) {
 			metadata.Copyright = value
 		case "publisher", "tpub", "label":
 			metadata.Publisher = value
+		case "composer", "writer", "wm/composer", "©wrt":
+			metadata.Composer = value
+		case "genre", "tcon":
+			metadata.Genre = value
 		case "url":
 			metadata.URL = value
-		case "description", "comment":
+		case "isrc", "tsrc":
+			metadata.ISRC = value
+		case "comment", "comments":
+			if metadata.Comment == "" {
+				metadata.Comment = value
+			}
+		case "description":
 			if metadata.Description == "" {
 				metadata.Description = value
 			}
 		}
 	}
 
+	metadata.UPC = firstPreferredFFprobeUPCValue(allTags)
+
 	return metadata, nil
 }
 
 func EmbedMetadataToConvertedFile(filePath string, metadata Metadata, coverPath string) error {
+	filePath = norm.NFC.String(filePath)
 	ext := strings.ToLower(pathfilepath.Ext(filePath))
 
 	switch ext {
@@ -817,14 +1025,12 @@ func embedMetadataToMP3(filePath string, metadata Metadata, coverPath string) er
 		return fmt.Errorf("failed to open MP3 file: %w", err)
 	}
 	defer tag.Close()
+	separator := resolveMetadataSeparator(metadata.Separator)
 
 	tag.DeleteFrames("TXXX")
 
 	if metadata.Title != "" {
 		tag.SetTitle(metadata.Title)
-	}
-	if metadata.Artist != "" {
-		tag.SetArtist(metadata.Artist)
 	}
 	if metadata.Album != "" {
 		tag.SetAlbum(metadata.Album)
@@ -837,10 +1043,17 @@ func embedMetadataToMP3(filePath string, metadata Metadata, coverPath string) er
 		tag.SetYear(year)
 	}
 
-	if metadata.AlbumArtist != "" {
-		tag.DeleteFrames("TPE2")
-		tag.AddTextFrame("TPE2", id3v2.EncodingUTF8, metadata.AlbumArtist)
+	artistText := joinMultiValueText(SplitArtistCredits(metadata.Artist, separator), separator, true)
+	if artistText == "" {
+		artistText = strings.TrimSpace(metadata.Artist)
 	}
+	addMP3TextFrame(tag, "TPE1", artistText)
+
+	albumArtistText := joinMultiValueText(SplitArtistCredits(metadata.AlbumArtist, separator), separator, true)
+	if albumArtistText == "" {
+		albumArtistText = strings.TrimSpace(metadata.AlbumArtist)
+	}
+	addMP3TextFrame(tag, "TPE2", albumArtistText)
 
 	if metadata.TrackNumber > 0 {
 		tag.DeleteFrames(tag.CommonID("Track number/Position in set"))
@@ -861,18 +1074,38 @@ func embedMetadataToMP3(filePath string, metadata Metadata, coverPath string) er
 	}
 
 	if metadata.Copyright != "" {
-		tag.DeleteFrames("TCOP")
-		tag.AddTextFrame("TCOP", id3v2.EncodingUTF8, metadata.Copyright)
+		addMP3TextFrame(tag, "TCOP", metadata.Copyright)
 	}
 
 	if metadata.Publisher != "" {
-		tag.DeleteFrames("TPUB")
-		tag.AddTextFrame("TPUB", id3v2.EncodingUTF8, metadata.Publisher)
+		addMP3TextFrame(tag, "TPUB", metadata.Publisher)
 	}
 
+	composerText := joinMultiValueText(SplitArtistCredits(metadata.Composer, separator), separator, true)
+	if composerText == "" {
+		composerText = strings.TrimSpace(metadata.Composer)
+	}
+	addMP3TextFrame(tag, "TCOM", composerText)
+
 	if metadata.ISRC != "" {
-		tag.DeleteFrames("TSRC")
-		tag.AddTextFrame("TSRC", id3v2.EncodingUTF8, metadata.ISRC)
+		addMP3TextFrame(tag, "TSRC", metadata.ISRC)
+	}
+	if metadata.UPC != "" {
+		tag.AddUserDefinedTextFrame(id3v2.UserDefinedTextFrame{
+			Encoding:    id3v2.EncodingUTF8,
+			Description: "UPC",
+			Value:       metadata.UPC,
+		})
+	}
+
+	if comment := resolveMetadataComment(metadata); comment != "" {
+		tag.DeleteFrames(tag.CommonID("Comments"))
+		tag.AddCommentFrame(id3v2.CommentFrame{
+			Encoding:    id3v2.EncodingUTF8,
+			Language:    "eng",
+			Description: "",
+			Text:        comment,
+		})
 	}
 
 	if coverPath != "" && fileExists(coverPath) {
@@ -893,6 +1126,12 @@ func embedMetadataToMP3(filePath string, metadata Metadata, coverPath string) er
 			fmt.Printf("[EmbedMetadataToMP3] Warning: Failed to read cover art file: %v\n", err)
 		}
 	}
+
+	genreText := joinMultiValueText(SplitMetadataValues(metadata.Genre, separator), separator, true)
+	if genreText == "" {
+		genreText = strings.TrimSpace(metadata.Genre)
+	}
+	addMP3TextFrame(tag, "TCON", genreText)
 
 	if err := tag.Save(); err != nil {
 		return fmt.Errorf("failed to save MP3 tags: %w", err)
@@ -915,6 +1154,7 @@ func embedMetadataToM4A(filePath string, metadata Metadata, coverPath string) er
 		"-i", filePath,
 		"-y",
 	}
+	separator := resolveMetadataSeparator(metadata.Separator)
 
 	if coverPath != "" && fileExists(coverPath) {
 		args = append(args, "-i", coverPath)
@@ -926,14 +1166,22 @@ func embedMetadataToM4A(filePath string, metadata Metadata, coverPath string) er
 	if metadata.Title != "" {
 		args = append(args, "-metadata", "title="+metadata.Title)
 	}
-	if metadata.Artist != "" {
-		args = append(args, "-metadata", "artist="+metadata.Artist)
+	artistText := joinMultiValueText(SplitArtistCredits(metadata.Artist, separator), separator, false)
+	if artistText == "" {
+		artistText = strings.TrimSpace(metadata.Artist)
+	}
+	if artistText != "" {
+		args = append(args, "-metadata", "artist="+artistText)
 	}
 	if metadata.Album != "" {
 		args = append(args, "-metadata", "album="+metadata.Album)
 	}
-	if metadata.AlbumArtist != "" {
-		args = append(args, "-metadata", "album_artist="+metadata.AlbumArtist)
+	albumArtistText := joinMultiValueText(SplitArtistCredits(metadata.AlbumArtist, separator), separator, false)
+	if albumArtistText == "" {
+		albumArtistText = strings.TrimSpace(metadata.AlbumArtist)
+	}
+	if albumArtistText != "" {
+		args = append(args, "-metadata", "album_artist="+albumArtistText)
 	}
 	if metadata.Date != "" {
 		args = append(args, "-metadata", "date="+metadata.Date)
@@ -958,8 +1206,28 @@ func embedMetadataToM4A(filePath string, metadata Metadata, coverPath string) er
 	if metadata.Publisher != "" {
 		args = append(args, "-metadata", "publisher="+metadata.Publisher)
 	}
+	composerText := joinMultiValueText(SplitArtistCredits(metadata.Composer, separator), separator, false)
+	if composerText == "" {
+		composerText = strings.TrimSpace(metadata.Composer)
+	}
+	if composerText != "" {
+		args = append(args, "-metadata", "composer="+composerText)
+	}
 	if metadata.ISRC != "" {
 		args = append(args, "-metadata", "isrc="+metadata.ISRC)
+	}
+	if metadata.UPC != "" {
+		args = append(args, "-metadata", "upc="+metadata.UPC)
+	}
+	genreText := joinMultiValueText(SplitMetadataValues(metadata.Genre, separator), separator, false)
+	if genreText == "" {
+		genreText = strings.TrimSpace(metadata.Genre)
+	}
+	if genreText != "" {
+		args = append(args, "-metadata", "genre="+genreText)
+	}
+	if comment := resolveMetadataComment(metadata); comment != "" {
+		args = append(args, "-metadata", "comment="+comment)
 	}
 
 	tmpOutputFile := strings.TrimSuffix(filePath, pathfilepath.Ext(filePath)) + ".tmp" + pathfilepath.Ext(filePath)

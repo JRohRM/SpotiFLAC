@@ -51,12 +51,12 @@ export function AudioConverterPage() {
         }
         return [];
     });
-    const [outputFormat, setOutputFormat] = useState<"mp3" | "m4a">(() => {
+    const [outputFormat, setOutputFormat] = useState<"mp3" | "m4a" | "wav" | "aiff" | "opus">(() => {
         try {
             const saved = sessionStorage.getItem(STORAGE_KEY);
             if (saved) {
                 const parsed = JSON.parse(saved);
-                if (parsed.outputFormat === "mp3" || parsed.outputFormat === "m4a") {
+                if (["mp3", "m4a", "wav", "aiff", "opus"].includes(parsed.outputFormat)) {
                     return parsed.outputFormat;
                 }
             }
@@ -98,7 +98,7 @@ export function AudioConverterPage() {
     const [isFullscreen, setIsFullscreen] = useState(false);
     const saveState = useCallback((stateToSave: {
         files: AudioFile[];
-        outputFormat: "mp3" | "m4a";
+        outputFormat: "mp3" | "m4a" | "wav" | "aiff" | "opus";
         bitrate: string;
         m4aCodec: "aac" | "alac";
     }) => {
@@ -116,7 +116,7 @@ export function AudioConverterPage() {
         if (files.length === 0)
             return;
         const allMP3 = files.every((f) => f.format === "mp3");
-        if (allMP3 && outputFormat !== "m4a") {
+        if (allMP3 && outputFormat === "mp3") {
             setOutputFormat("m4a");
         }
         const hasFlac = files.some((f) => f.format === "flac");
@@ -375,14 +375,23 @@ export function AudioConverterPage() {
                         <div className="flex items-center gap-2">
                             <Label className="whitespace-nowrap">Format:</Label>
                             <ToggleGroup type="single" variant="outline" value={outputFormat} onValueChange={(value) => {
-                if (value && !isFormatDisabled)
-                    setOutputFormat(value as "mp3" | "m4a");
-            }} disabled={isFormatDisabled}>
+                if (value)
+                    setOutputFormat(value as "mp3" | "m4a" | "wav" | "aiff" | "opus");
+            }}>
                                 {!isFormatDisabled && (<ToggleGroupItem value="mp3" aria-label="MP3">
                                     MP3
                                 </ToggleGroupItem>)}
-                                <ToggleGroupItem value="m4a" aria-label="M4A" disabled={isFormatDisabled}>
+                                <ToggleGroupItem value="m4a" aria-label="M4A">
                                     M4A
+                                </ToggleGroupItem>
+                                <ToggleGroupItem value="opus" aria-label="Opus">
+                                    Opus
+                                </ToggleGroupItem>
+                                <ToggleGroupItem value="wav" aria-label="WAV">
+                                    WAV
+                                </ToggleGroupItem>
+                                <ToggleGroupItem value="aiff" aria-label="AIFF">
+                                    AIFF
                                 </ToggleGroupItem>
                             </ToggleGroup>
                         </div>
@@ -399,7 +408,7 @@ export function AudioConverterPage() {
                             </ToggleGroup>
                         </div>)}
 
-                        {!(outputFormat === "m4a" && m4aCodec === "alac") && (<div className="flex items-center gap-2">
+                        {(outputFormat === "mp3" || outputFormat === "opus" || (outputFormat === "m4a" && m4aCodec === "aac")) && (<div className="flex items-center gap-2">
                             <Label className="whitespace-nowrap">Bitrate:</Label>
                             <ToggleGroup type="single" variant="outline" value={bitrate} onValueChange={(value) => {
                     if (value)

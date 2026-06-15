@@ -1,14 +1,18 @@
-import { useState } from "react";
-import { getSettings } from "@/lib/settings";
+import { useEffect, useRef, useState } from "react";
 import { fetchSpotifyMetadata } from "@/lib/api";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
 import { logger } from "@/lib/logger";
-import { AddFetchHistory } from "../../wailsjs/go/main/App";
+import { AddFetchHistory, SearchSpotifyByType } from "../../wailsjs/go/main/App";
+import { EventsOff, EventsOn } from "../../wailsjs/runtime/runtime";
 import type { SpotifyMetadataResponse } from "@/types/api";
 export function useMetadata() {
     const [loading, setLoading] = useState(false);
     const [metadata, setMetadata] = useState<SpotifyMetadataResponse | null>(null);
-    const [showApiModal, setShowApiModal] = useState(false);
+    const [showVpnAdviceDialog, setShowVpnAdviceDialog] = useState(false);
+    const [fetchFailureReason, setFetchFailureReason] = useState("");
+    const loadingToastId = useRef<string | number | null>(null);
+    const fetchedCount = useRef(0);
+    const currentName = useRef("");
     const [showAlbumDialog, setShowAlbumDialog] = useState(false);
     const [selectedAlbum, setSelectedAlbum] = useState<{
         id: string;
@@ -16,6 +20,90 @@ export function useMetadata() {
         external_urls: string;
     } | null>(null);
     const [pendingArtistName, setPendingArtistName] = useState<string | null>(null);
+    const showFetchFailureAdvice = (errorMsg: string) => {
+        setFetchFailureReason(errorMsg);
+        setShowVpnAdviceDialog(true);
+    };
+    const resolveArtistUrlBySearch = async (artistName: string): Promise<string | null> => {
+        const query = artistName.trim();
+        if (!query) {
+            return null;
+        }
+        const results = await SearchSpotifyByType({
+            query,
+            search_type: "artist",
+            limit: 1,
+            offset: 0,
+        });
+        return results[0]?.external_urls || null;
+    };
+    useEffect(() => {
+        if (loading) {
+            fetchedCount.current = 0;
+            currentName.current = "";
+            loadingToastId.current = toast.silentInfo("fetching metadata...", {
+                duration: Infinity,
+                description: "please wait while we retrieve the information"
+            });
+            return;
+        }
+        if (loadingToastId.current) {
+            toast.dismiss(loadingToastId.current);
+            loadingToastId.current = null;
+        }
+    }, [loading]);
+    useEffect(() => {
+        const handler = (data: any) => {
+            if (!data) {
+                return;
+            }
+            if (Array.isArray(data)) {
+                fetchedCount.current += data.length;
+                if (loadingToastId.current && currentName.current) {
+                    toast.silentInfo(`fetching tracks for ${currentName.current.toLowerCase()}...`, {
+                        id: loadingToastId.current,
+                        description: `${fetchedCount.current.toLocaleString()} tracks fetched`
+                    });
+                }
+            }
+            else {
+                const baseInfo = data;
+                const name = "artist_info" in baseInfo ? baseInfo.artist_info.name :
+                    "album_info" in baseInfo ? baseInfo.album_info.name :
+                        "playlist_info" in baseInfo ? (baseInfo.playlist_info.name || baseInfo.playlist_info.owner.name) : "";
+                if (name) {
+                    currentName.current = name;
+                    if (loadingToastId.current) {
+                        toast.silentInfo(`fetching tracks for ${name.toLowerCase()}...`, {
+                            id: loadingToastId.current,
+                            description: `${fetchedCount.current.toLocaleString()} tracks fetched`
+                        });
+                    }
+                }
+            }
+            setMetadata(prev => {
+                if (Array.isArray(data)) {
+                    if (!prev || !("track_list" in prev)) {
+                        return prev;
+                    }
+                    return {
+                        ...prev,
+                        track_list: [...prev.track_list, ...data]
+                    };
+                }
+                if (prev && "track_list" in prev && prev.track_list.length > 0) {
+                    return prev;
+                }
+                const baseInfo = data;
+                if (!("track_list" in baseInfo)) {
+                    baseInfo.track_list = [];
+                }
+                return baseInfo;
+            });
+        };
+        EventsOn("metadata-stream", handler);
+        return () => EventsOff("metadata-stream");
+    }, []);
     const getUrlType = (url: string): string => {
         if (url.includes("/track/"))
             return "track";
@@ -71,6 +159,7 @@ export function useMetadata() {
                 info: info,
                 image: image,
                 data: jsonStr,
+                is_explicit: ("track" in data && Boolean(data.track.is_explicit)) || ("album_info" in data && Boolean(data.album_info.is_explicit)),
                 timestamp: Math.floor(Date.now() / 1000)
             });
         }
@@ -131,13 +220,8 @@ export function useMetadata() {
         catch (err) {
             const errorMsg = err instanceof Error ? err.message : "Failed to fetch metadata";
             logger.error(`fetch failed: ${errorMsg}`);
-            const settings = getSettings();
-            if (!settings.useSpotFetchAPI) {
-                setShowApiModal(true);
-            }
-            else {
-                toast.error(errorMsg);
-            }
+            toast.error(errorMsg);
+            showFetchFailureAdvice(errorMsg);
         }
         finally {
             setLoading(false);
@@ -191,10 +275,17 @@ export function useMetadata() {
         external_urls: string;
     }) => {
         logger.debug(`artist clicked: ${artist.name}`);
-        const artistUrl = artist.external_urls.replace(/\/$/, "") + "/discography/all";
+        const resolvedArtistUrl = artist.external_urls.trim() || (await resolveArtistUrlBySearch(artist.name)) || "";
+        if (!resolvedArtistUrl) {
+            toast.error(`Artist not found: ${artist.name}`);
+            return "";
+        }
+        const artistUrl = resolvedArtistUrl.includes("/discography")
+            ? resolvedArtistUrl
+            : resolvedArtistUrl.replace(/\/$/, "") + "/discography/all";
         setPendingArtistName(artist.name);
         await fetchMetadataDirectly(artistUrl);
-        return artistUrl;
+        return resolvedArtistUrl;
     };
     const handleConfirmAlbumFetch = async () => {
         if (!selectedAlbum)
@@ -232,13 +323,8 @@ export function useMetadata() {
         catch (err) {
             const errorMsg = err instanceof Error ? err.message : "Failed to fetch album metadata";
             logger.error(`fetch failed: ${errorMsg}`);
-            const settings = getSettings();
-            if (!settings.useSpotFetchAPI) {
-                setShowApiModal(true);
-            }
-            else {
-                toast.error(errorMsg);
-            }
+            toast.error(errorMsg);
+            showFetchFailureAdvice(errorMsg);
         }
         finally {
             setLoading(false);
@@ -248,6 +334,9 @@ export function useMetadata() {
     return {
         loading,
         metadata,
+        showVpnAdviceDialog,
+        setShowVpnAdviceDialog,
+        fetchFailureReason,
         showAlbumDialog,
         setShowAlbumDialog,
         selectedAlbum,
@@ -257,8 +346,6 @@ export function useMetadata() {
         handleConfirmAlbumFetch,
         handleArtistClick,
         loadFromCache,
-        showApiModal,
-        setShowApiModal,
         resetMetadata: () => setMetadata(null),
     };
 }

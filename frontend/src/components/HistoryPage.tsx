@@ -9,6 +9,9 @@ import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, Pagi
 import { GetDownloadHistory, ClearDownloadHistory, GetPreviewURL, GetFetchHistory, DeleteDownloadHistoryItem, DeleteFetchHistoryItem, ClearFetchHistoryByType } from "../../wailsjs/go/main/App";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { openExternal } from "@/lib/utils";
+import { getPreviewVolume } from "@/lib/preview";
+import { createPreviewPlayback, type PreviewPlayback } from "@/lib/preview-player";
+import { TidalIcon, QobuzIcon, AmazonIcon } from "./PlatformIcons";
 const formatDate = (timestamp: number) => {
     const date = new Date(timestamp * 1000);
     const year = date.getFullYear();
@@ -18,6 +21,37 @@ const formatDate = (timestamp: number) => {
     const minutes = String(date.getMinutes()).padStart(2, '0');
     const seconds = String(date.getSeconds()).padStart(2, '0');
     return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+};
+const getHistoryFormatLabel = (item: DownloadHistoryItem) => {
+    const normalizedPath = (item.path || "").trim().toLowerCase();
+    if (normalizedPath.endsWith(".flac"))
+        return "FLAC";
+    if (normalizedPath.endsWith(".mp3"))
+        return "MP3";
+    if (normalizedPath.endsWith(".m4a"))
+        return "M4A";
+    const normalizedFormat = (item.format || "").trim().toLowerCase();
+    switch (normalizedFormat) {
+        case "hi_res":
+        case "hi_res_lossless":
+        case "lossless":
+        case "flac":
+        case "6":
+        case "7":
+        case "27":
+            return "FLAC";
+        case "alac":
+        case "apple":
+        case "atmos":
+        case "m4a":
+        case "m4a-aac":
+        case "m4a-alac":
+            return "M4A";
+        case "mp3":
+            return "MP3";
+        default:
+            return (item.format || "-").toUpperCase();
+    }
 };
 interface DownloadHistoryItem {
     id: string;
@@ -30,6 +64,7 @@ interface DownloadHistoryItem {
     quality: string;
     format: string;
     path: string;
+    source: string;
     timestamp: number;
 }
 interface FetchHistoryItem {
@@ -40,6 +75,7 @@ interface FetchHistoryItem {
     info: string;
     image: string;
     data: string;
+    is_explicit?: boolean;
     timestamp: number;
 }
 interface HistoryPageProps {
@@ -54,7 +90,7 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
     const [downloadSortBy, setDownloadSortBy] = useState("default");
     const [downloadCurrentPage, setDownloadCurrentPage] = useState(1);
     const [playingPreviewId, setPlayingPreviewId] = useState<string | null>(null);
-    const audioRef = useRef<HTMLAudioElement | null>(null);
+    const playbackRef = useRef<PreviewPlayback | null>(null);
     const [fetchHistory, setFetchHistory] = useState<FetchHistoryItem[]>([]);
     const [filteredFetchHistory, setFilteredFetchHistory] = useState<FetchHistoryItem[]>([]);
     const [activeFetchTab, setActiveFetchTab] = useState("track");
@@ -62,10 +98,35 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
     const [fetchSearchQuery, setFetchSearchQuery] = useState("");
     const [fetchCurrentPage, setFetchCurrentPage] = useState(1);
     const ITEMS_PER_PAGE = 50;
+    const getTrackLink = (spotifyId: string) => {
+        if (spotifyId?.startsWith("tidal_"))
+            return { url: `https://listen.tidal.com/track/${spotifyId.replace("tidal_", "")}`, label: "Open in Tidal" };
+        if (spotifyId?.startsWith("qobuz_"))
+            return { url: `https://www.qobuz.com/track/${spotifyId.replace("qobuz_", "")}`, label: "Open in Qobuz" };
+        if (spotifyId?.startsWith("amazon_"))
+            return { url: `https://music.amazon.com/tracks/${spotifyId.replace("amazon_", "")}`, label: "Open in Amazon Music" };
+        if (spotifyId?.startsWith("deezer_"))
+            return { url: `https://www.deezer.com/track/${spotifyId.replace("deezer_", "")}`, label: "Open in Deezer" };
+        return { url: `https://open.spotify.com/track/${spotifyId}`, label: "Open in Spotify" };
+    };
+    const getSourceIcon = (source: string) => {
+        const s = source?.toLowerCase() || "";
+        if (s.includes("tidal"))
+            return <TidalIcon className="h-4 w-4 object-contain rounded"/>;
+        if (s.includes("qobuz"))
+            return <QobuzIcon className="h-4 w-4 object-contain"/>;
+        if (s.includes("amazon"))
+            return <AmazonIcon className="h-4 w-4 object-contain rounded"/>;
+        if (s.includes("deezer"))
+            return <Music2 className="h-4 w-4"/>;
+        if (s.includes("spotify"))
+            return <Music2 className="h-4 w-4"/>;
+        return <Music2 className="h-4 w-4 opacity-50"/>;
+    };
     const fetchDownloadHistory = async () => {
         try {
             const items = await GetDownloadHistory();
-            setDownloadHistory(items || []);
+            setDownloadHistory((items || []) as unknown as DownloadHistoryItem[]);
         }
         catch (err) {
             console.error("Failed to fetch download history:", err);
@@ -94,9 +155,8 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
     }, [activeTab]);
     useEffect(() => {
         return () => {
-            if (audioRef.current) {
-                audioRef.current.pause();
-            }
+            playbackRef.current?.destroy();
+            playbackRef.current = null;
         };
     }, []);
     useEffect(() => {
@@ -152,20 +212,35 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
     }, [fetchSearchQuery, activeFetchTab]);
     const handlePreview = async (id: string, spotifyId: string) => {
         if (playingPreviewId === id) {
-            audioRef.current?.pause();
+            playbackRef.current?.destroy();
+            playbackRef.current = null;
             setPlayingPreviewId(null);
             return;
         }
-        if (audioRef.current) {
-            audioRef.current.pause();
+        if (playbackRef.current) {
+            playbackRef.current.destroy();
+            playbackRef.current = null;
         }
         try {
             const url = await GetPreviewURL(spotifyId);
             if (url) {
-                const audio = new Audio(url);
-                audioRef.current = audio;
-                audio.volume = 0.5;
-                audio.onended = () => setPlayingPreviewId(null);
+                const playback = await createPreviewPlayback(url, getPreviewVolume());
+                const audio = playback.audio;
+                playbackRef.current = playback;
+                audio.onended = () => {
+                    setPlayingPreviewId(null);
+                    if (playbackRef.current?.audio === audio) {
+                        playbackRef.current.destroy();
+                        playbackRef.current = null;
+                    }
+                };
+                audio.onerror = () => {
+                    setPlayingPreviewId(null);
+                    if (playbackRef.current?.audio === audio) {
+                        playbackRef.current.destroy();
+                        playbackRef.current = null;
+                    }
+                };
                 audio.play();
                 setPlayingPreviewId(id);
             }
@@ -228,8 +303,8 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
                      <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                              <h2 className="text-xl font-bold tracking-tight">Downloads</h2>
-                             {downloadHistory.length > 0 && (<Badge variant="secondary" className="font-mono">
-                                    {downloadHistory.length.toLocaleString('en-US')}
+                             {filteredDownloadHistory.length > 0 && (<Badge variant="secondary" className="font-mono">
+                                    {filteredDownloadHistory.length.toLocaleString('en-US')}
                                 </Badge>)}
                         </div>
                         <Button variant="outline" size="sm" onClick={() => setShowClearDownloadConfirm(true)} disabled={downloadHistory.length === 0} className="cursor-pointer gap-2">
@@ -243,7 +318,7 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
                             <Input placeholder="Search downloads..." value={downloadSearchQuery} onChange={(e) => setDownloadSearchQuery(e.target.value)} className="pl-8 h-9"/>
                         </div>
                         <Select value={downloadSortBy} onValueChange={setDownloadSortBy}>
-                            <SelectTrigger className="w-[180px] h-9">
+                            <SelectTrigger className="w-45 h-9">
                                 <ArrowUpDown className="mr-2 h-4 w-4"/>
                                 <SelectValue placeholder="Sort by"/>
                             </SelectTrigger>
@@ -275,11 +350,12 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
                              <thead>
                                 <tr className="border-b bg-muted/50">
                                     <th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground w-12 text-xs uppercase">#</th>
-                                    <th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground text-xs uppercase">Title</th>
-                                    <th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground hidden md:table-cell text-xs uppercase w-1/4">Album</th>
+                                    <th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground text-xs uppercase w-[35%]">Title</th>
+                                    <th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground hidden md:table-cell text-xs uppercase w-48 lg:w-48 xl:w-56">Album</th>
                                     <th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground hidden lg:table-cell w-32 text-xs uppercase">Format</th>
                                     <th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground hidden xl:table-cell w-16 text-xs uppercase text-nowrap">Dur</th>
                                     <th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground hidden md:table-cell w-36 text-xs uppercase text-nowrap">Downloaded At</th>
+                                    <th className="h-10 px-4 text-center align-middle font-medium text-muted-foreground w-16 text-xs uppercase text-nowrap">Source</th>
                                     <th className="h-10 px-4 text-center align-middle font-medium text-muted-foreground w-32 text-xs uppercase text-nowrap">Actions</th>
                                 </tr>
                             </thead>
@@ -300,10 +376,10 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
                                         <td className="p-3 align-middle text-sm text-muted-foreground hidden md:table-cell">
                                             <div className="truncate">{item.album}</div>
                                         </td>
-                                         <td className="p-3 align-middle text-left hidden lg:table-cell">
+                                        <td className="p-3 align-middle text-left hidden lg:table-cell">
                                             <div className="flex flex-col items-start gap-1">
                                                 <span className="text-xs font-bold text-foreground">
-                                                    {['HI_RES_LOSSLESS', 'LOSSLESS', 'flac', '6', '7', '27'].includes(item.format?.toLowerCase() || '') ? 'FLAC' : item.format?.toUpperCase()}
+                                                    {getHistoryFormatLabel(item)}
                                                 </span>
                                                 {item.quality && <span className="text-[11px] text-muted-foreground leading-none whitespace-nowrap">{item.quality}</span>}
                                             </div>
@@ -311,36 +387,52 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
                                         <td className="p-3 align-middle text-sm text-muted-foreground text-left hidden xl:table-cell font-mono">
                                             {item.duration_str}
                                         </td>
-                                         <td className="p-3 align-middle text-xs text-muted-foreground hidden md:table-cell whitespace-nowrap">
+                                         <td className="p-3 align-middle text-xs text-muted-foreground hidden md:table-cell whitespace-nowrap text-left">
                                             <div className="flex flex-col">
                                                 <span>{formatDate(item.timestamp).split(' ')[0]}</span>
                                                 <span className="text-[10px] text-muted-foreground">{formatDate(item.timestamp).split(' ')[1]}</span>
                                             </div>
                                         </td>
                                         <td className="p-3 align-middle text-center">
-                                            <div className="flex items-center justify-center gap-1">
+                                            <div className="flex items-center justify-center">
                                                 <TooltipProvider>
                                                     <Tooltip delayDuration={0}>
                                                         <TooltipTrigger asChild>
-                                                            <Button variant="ghost" size="icon" className="h-8 w-8 cursor-pointer" onClick={() => handlePreview(item.id, item.spotify_id)} disabled={!item.spotify_id}>
-                                                                {playingPreviewId === item.id ? <Pause className="h-4 w-4"/> : <Play className="h-4 w-4"/>}
-                                                            </Button>
+                                                            <div className="flex items-center justify-center">
+                                                                {getSourceIcon(item.source)}
+                                                            </div>
                                                         </TooltipTrigger>
                                                         <TooltipContent>
-                                                            <p>{playingPreviewId === item.id ? "Pause Preview" : "Play Preview"}</p>
+                                                            <p className="capitalize">{item.source || "Unknown"}</p>
                                                         </TooltipContent>
                                                     </Tooltip>
                                                 </TooltipProvider>
+                                            </div>
+                                        </td>
+                                        <td className="p-3 align-middle text-center">
+                                            <div className="flex items-center justify-center gap-1">
+                                                {!(item.spotify_id?.startsWith('tidal_') || item.spotify_id?.startsWith('qobuz_') || item.spotify_id?.startsWith('amazon_') || item.spotify_id?.startsWith('deezer_')) && (<TooltipProvider>
+                                                        <Tooltip delayDuration={0}>
+                                                            <TooltipTrigger asChild>
+                                                                <Button variant="ghost" size="icon" className="h-8 w-8 cursor-pointer" onClick={() => handlePreview(item.id, item.spotify_id)} disabled={!item.spotify_id}>
+                                                                    {playingPreviewId === item.id ? <Pause className="h-4 w-4"/> : <Play className="h-4 w-4"/>}
+                                                                </Button>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>
+                                                                <p>{playingPreviewId === item.id ? "Pause Preview" : "Play Preview"}</p>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    </TooltipProvider>)}
 
                                                 <TooltipProvider>
                                                     <Tooltip delayDuration={0}>
                                                         <TooltipTrigger asChild>
-                                                            <Button variant="ghost" size="icon" className="h-8 w-8 cursor-pointer" onClick={() => openExternal(`https://open.spotify.com/track/${item.spotify_id}`)}>
+                                                            <Button variant="ghost" size="icon" className="h-8 w-8 cursor-pointer" onClick={() => openExternal(getTrackLink(item.spotify_id).url)}>
                                                                 <ExternalLink className="h-4 w-4"/>
                                                             </Button>
                                                         </TooltipTrigger>
                                                         <TooltipContent>
-                                                            <p>Open in Spotify</p>
+                                                            <p>{getTrackLink(item.spotify_id).label}</p>
                                                         </TooltipContent>
                                                     </Tooltip>
                                                 </TooltipProvider>
@@ -475,7 +567,10 @@ export function HistoryPage({ onHistorySelect }: HistoryPageProps) {
                                                             {item.type.slice(0, 2).toUpperCase()}
                                                         </div>)}
                                                 </div>
-                                                <span className="font-medium text-sm truncate">{item.name}</span>
+                                                <span className="font-medium text-sm truncate flex items-center gap-2">
+                                                    {item.is_explicit && (<span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded bg-red-600 text-[10px] text-white" title="Explicit">E</span>)}
+                                                    <span className="truncate">{item.name}</span>
+                                                </span>
                                             </div>
                                         </td>
                                         <td className="p-3 align-middle text-sm text-muted-foreground hidden md:table-cell">

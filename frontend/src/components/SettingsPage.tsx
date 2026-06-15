@@ -1,46 +1,42 @@
 import { useState, useEffect, useCallback } from "react";
 import { flushSync } from "react-dom";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { InputWithContext } from "@/components/ui/input-with-context";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger, } from "@/components/ui/tooltip";
-import { FolderOpen, Save, RotateCcw, Info, ArrowRight, MonitorCog, FolderCog, Router, FolderLock } from "lucide-react";
+import { FolderOpen, Save, RotateCcw, Info, ArrowRight, MonitorCog, FolderCog, Router, FolderLock, Plus, Trash2, ExternalLink, PlugZap, Download, Tags } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { getSettings, getSettingsWithDefaults, saveSettings, resetToDefaultSettings, applyThemeMode, applyFont, FONT_OPTIONS, FOLDER_PRESETS, FILENAME_PRESETS, TEMPLATE_VARIABLES, type Settings as SettingsType, type FontFamily, type FolderPreset, type FilenamePreset, } from "@/lib/settings";
+import { getSettings, getSettingsWithDefaults, saveSettings, resetToDefaultSettings, applyThemeMode, applyFont, getFontOptions, parseGoogleFontUrl, loadGoogleFontUrl, loadCustomFonts, saveCustomFonts, FOLDER_PRESETS, FILENAME_PRESETS, TEMPLATE_VARIABLES, sanitizeAutoOrder, type Settings as SettingsType, type FontFamily, type CustomFontFamily, type FolderPreset, type FilenamePreset, type ExistingFileCheckMode, } from "@/lib/settings";
 import { themes, applyTheme } from "@/lib/themes";
-import { SelectFolder, OpenConfigFolder } from "../../wailsjs/go/main/App";
+import { SelectFolder, OpenConfigFolder, CheckCustomTidalAPI, CheckCustomQobuzAPI } from "../../wailsjs/go/main/App";
 import { toastWithSound as toast } from "@/lib/toast-with-sound";
+import { openExternal } from "@/lib/utils";
 import { ApiStatusTab } from "./ApiStatusTab";
-const TidalIcon = ({ className }: {
-    className?: string;
-}) => (<svg viewBox="0 0 24 24" className={`inline-block w-[1.1em] h-[1.1em] mr-2 ${className || "fill-muted-foreground"}`}>
-    <path d="M4.022 4.5 0 8.516l3.997 3.99 3.997-3.984L4.022 4.5Zm7.956 0L7.994 8.522l4.003 3.984L16 8.484 11.978 4.5Zm8.007 0L24 8.528l-4.003 3.978L16 8.484 19.985 4.5Z"></path>
-    <path d="m8.012 16.534 3.991 3.966L16 16.49l-4.003-3.984-3.985 4.028Z"></path>
-  </svg>);
-const QobuzIcon = ({ className }: {
-    className?: string;
-}) => (<svg viewBox="0 0 24 24" className={`inline-block w-[1.1em] h-[1.1em] mr-2 ${className || "fill-muted-foreground"}`}>
-    <path d="M21.744 9.815C19.836 1.261 8.393-1 3.55 6.64-.618 13.214 4 22 11.988 22c2.387 0 4.63-.83 6.394-2.304l2.252 2.252 1.224-1.224-2.252-2.253c1.983-2.407 2.823-5.586 2.138-8.656Zm-3.508 7.297L16.4 15.275c-.786-.787-2.017.432-1.224 1.225L17 18.326C10.29 23.656.5 16 5.16 7.667c3.502-6.264 13.172-4.348 14.707 2.574.529 2.385-.06 4.987-1.63 6.87Z"></path>
-    <path d="M13.4 8.684a3.59 3.59 0 0 0-4.712 1.9 3.59 3.59 0 0 0 1.9 4.712 3.594 3.594 0 0 0 4.711-1.89 3.598 3.598 0 0 0-1.9-4.722Zm-.737 3.591a.727.727 0 0 1-.965.384.727.727 0 0 1-.384-.965.727.727 0 0 1 .965-.384.73.73 0 0 1 .384.965Z"></path>
-  </svg>);
-const AmazonIcon = ({ className }: {
-    className?: string;
-}) => (<svg viewBox="0 0 24 24" className={`inline-block w-[1.1em] h-[1.1em] mr-2 ${className || "fill-muted-foreground"}`}>
-    <path fillRule="evenodd" d="M15.62 11.13c-.15.1-.37.18-.64.18-.42 0-.82-.05-1.21-.18l-.22-.04c-.08 0-.1.04-.1.14v.25c0 .08.02.12.05.17.02.03.07.08.15.1.4.18.84.25 1.33.25.52 0 .91-.12 1.24-.37.32-.25.47-.57.47-.99 0-.3-.08-.52-.23-.72-.15-.17-.4-.34-.74-.47l-.7-.27c-.26-.1-.46-.2-.53-.3a.47.47 0 0 1-.15-.36c0-.38.27-.57.84-.57.32 0 .64.05.94.15l.2.04c.07 0 .12-.04.12-.14v-.25c0-.08-.03-.12-.05-.17-.03-.05-.08-.08-.15-.1-.37-.13-.74-.2-1.11-.2-.47 0-.87.12-1.16.35-.3.22-.45.54-.45.91 0 .57.32.99.97 1.24l.74.27c.24.1.4.17.5.27.09.1.12.2.12.35 0 .2-.08.37-.23.46Zm-3.88-3.55v3.28c-.42.28-.84.42-1.26.42-.27 0-.47-.07-.6-.22-.11-.15-.16-.37-.16-.7V7.59c0-.13-.05-.18-.18-.18h-.52c-.12 0-.17.05-.17.18v3.06c0 .42.1.77.32.99.22.22.55.35.97.35.56 0 1.13-.2 1.68-.6l.05.3c0 .07.02.1.07.12.02.03.07.03.15.03h.37c.12 0 .17-.05.17-.18V7.58c0-.13-.05-.18-.17-.18h-.52c-.15 0-.2.08-.2.18Zm-4.69 4.27h.52c.12 0 .17-.05.17-.17v-3.1c0-.41-.1-.73-.32-.95a1.25 1.25 0 0 0-.94-.35c-.57 0-1.16.2-1.73.62-.2-.42-.57-.62-1.11-.62-.55 0-1.1.2-1.64.57l-.04-.27c0-.08-.03-.1-.08-.13-.02-.02-.07-.02-.12-.02h-.4c-.12 0-.17.05-.17.17v4.1c0 .13.05.18.17.18h.52c.12 0 .17-.05.17-.18V8.37c.42-.25.84-.4 1.29-.4.25 0 .42.08.52.22.1.15.17.35.17.65v2.84c0 .12.05.17.17.17h.52c.13 0 .18-.05.18-.17V8.37c.44-.27.86-.4 1.28-.4.25 0 .42.08.52.22.1.15.17.35.17.65v2.84c0 .12.05.17.18.17Zm13.47 3.29a21.8 21.8 0 0 1-8.3 1.7c-3.96 0-7.8-1.08-10.88-2.89a.35.35 0 0 0-.15-.05c-.17 0-.27.2-.1.37a16.11 16.11 0 0 0 10.87 4.16c3.02 0 6.5-.94 8.9-2.72.42-.3.08-.74-.34-.57Zm-.08-6.74c.22-.26.57-.38 1.06-.38.25 0 .5.03.72.1l.15.02c.07 0 .12-.04.12-.17v-.25c0-.07-.02-.14-.05-.17a.54.54 0 0 0-.12-.1c-.32-.07-.64-.15-.94-.15-.7 0-1.21.2-1.6.62-.38.4-.57 1-.57 1.73 0 .74.17 1.31.54 1.7.37.4.89.6 1.58.6.37 0 .72-.05.99-.17.07-.03.12-.05.15-.1.02-.03.02-.1.02-.17v-.25c0-.13-.05-.17-.12-.17-.03 0-.07 0-.12.02-.28.07-.55.12-.8.12-.46 0-.81-.12-1.03-.37-.23-.24-.32-.64-.32-1.16v-.12c.02-.55.12-.94.34-1.19Z" clipRule="evenodd"></path>
-    <path fillRule="evenodd" d="M21.55 17.46c1.29-1.09 1.64-3.33 1.36-3.68-.12-.15-.71-.3-1.45-.3-.8 0-1.73.18-2.45.67-.22.15-.17.35.05.32.76-.1 2.5-.3 2.82.1.3.4-.35 2.03-.65 2.74-.07.23.1.3.32.15ZM18.12 7.4h-.52c-.12 0-.17.05-.17.18v4.1c0 .12.05.17.17.17h.52c.12 0 .17-.05.17-.17v-4.1c0-.1-.05-.18-.17-.18Zm.15-1.68a.58.58 0 0 0-.42-.15c-.18 0-.3.05-.4.15a.5.5 0 0 0-.15.37c0 .15.05.3.15.37.1.1.22.15.4.15.17 0 .3-.05.4-.15a.5.5 0 0 0 .14-.37c0-.15-.02-.3-.12-.37Z" clipRule="evenodd"></path>
-  </svg>);
+import { AmazonIcon, QobuzIcon, SonglinkIcon, SongstatsIcon, TidalIcon } from "./PlatformIcons";
 interface SettingsPageProps {
     onUnsavedChangesChange?: (hasUnsavedChanges: boolean) => void;
     onResetRequest?: (resetFn: () => void) => void;
 }
+type CustomTidalApiStatus = "idle" | "checking" | "online" | "offline";
 export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: SettingsPageProps) {
     const [savedSettings, setSavedSettings] = useState<SettingsType>(getSettings());
     const [tempSettings, setTempSettings] = useState<SettingsType>(savedSettings);
     const [isDark, setIsDark] = useState(document.documentElement.classList.contains("dark"));
     const [showResetConfirm, setShowResetConfirm] = useState(false);
+    const [showAddFontDialog, setShowAddFontDialog] = useState(false);
+    const [showCustomTidalApiDialog, setShowCustomTidalApiDialog] = useState(false);
+    const [showCustomQobuzApiDialog, setShowCustomQobuzApiDialog] = useState(false);
+    const [addFontUrl, setAddFontUrl] = useState("");
+    const [customTidalApiStatus, setCustomTidalApiStatus] = useState<CustomTidalApiStatus>("idle");
+    const [customQobuzApiStatus, setCustomQobuzApiStatus] = useState<CustomTidalApiStatus>("idle");
+    const parsedAddFont = parseGoogleFontUrl(addFontUrl);
+    const fontOptions = getFontOptions(tempSettings.customFonts);
     const hasUnsavedChanges = JSON.stringify(savedSettings) !== JSON.stringify(tempSettings);
+    const effectiveDownloader = tempSettings.downloader;
+    const effectiveAutoOrder = sanitizeAutoOrder(tempSettings.autoOrder);
     const resetToSaved = useCallback(() => {
         const freshSavedSettings = getSettings();
         flushSync(() => {
@@ -72,14 +68,20 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
     useEffect(() => {
         applyThemeMode(tempSettings.themeMode);
         applyTheme(tempSettings.theme);
-        applyFont(tempSettings.fontFamily);
+        applyFont(tempSettings.fontFamily, tempSettings.customFonts);
         setTimeout(() => {
             setIsDark(document.documentElement.classList.contains("dark"));
         }, 0);
-    }, [tempSettings.themeMode, tempSettings.theme, tempSettings.fontFamily]);
+    }, [tempSettings.themeMode, tempSettings.theme, tempSettings.fontFamily, tempSettings.customFonts]);
+    useEffect(() => {
+        if (showAddFontDialog && parsedAddFont) {
+            loadGoogleFontUrl(parsedAddFont.url, "spotiflac-add-font-preview");
+        }
+    }, [showAddFontDialog, parsedAddFont]);
     useEffect(() => {
         const loadDefaults = async () => {
-            if (!savedSettings.downloadPath) {
+            const currentSettings = getSettings();
+            if (!currentSettings.downloadPath) {
                 const settingsWithDefaults = await getSettingsWithDefaults();
                 setSavedSettings(settingsWithDefaults);
                 setTempSettings(settingsWithDefaults);
@@ -88,9 +90,19 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
         };
         loadDefaults();
     }, []);
+    useEffect(() => {
+        const syncCustomFonts = async () => {
+            const customFonts = await loadCustomFonts();
+            setSavedSettings((prev) => ({ ...prev, customFonts }));
+            setTempSettings((prev) => ({ ...prev, customFonts }));
+        };
+        void syncCustomFonts();
+    }, []);
     const handleSave = async () => {
         await saveSettings(tempSettings);
-        setSavedSettings(tempSettings);
+        const persistedSettings = getSettings();
+        setSavedSettings(persistedSettings);
+        setTempSettings(persistedSettings);
         toast.success("Settings saved");
         onUnsavedChangesChange?.(false);
     };
@@ -100,7 +112,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
         setSavedSettings(defaultSettings);
         applyThemeMode(defaultSettings.themeMode);
         applyTheme(defaultSettings.theme);
-        applyFont(defaultSettings.fontFamily);
+        applyFont(defaultSettings.fontFamily, defaultSettings.customFonts);
         setShowResetConfirm(false);
         toast.success("Settings reset to default");
     };
@@ -116,26 +128,152 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
             toast.error(`Error selecting folder: ${error}`);
         }
     };
+    const closeAddFontDialog = () => {
+        setShowAddFontDialog(false);
+        setAddFontUrl("");
+    };
+    const handleAddFont = async () => {
+        if (!parsedAddFont) {
+            toast.error("Enter a valid Google Fonts URL");
+            return;
+        }
+        const existingFonts = tempSettings.customFonts || [];
+        const existingIndex = existingFonts.findIndex((font) => font.value === parsedAddFont.value || font.url === parsedAddFont.url);
+        const customFonts = existingIndex >= 0
+            ? existingFonts.map((font, index) => index === existingIndex ? parsedAddFont : font)
+            : [...existingFonts, parsedAddFont];
+        const savedCustomFonts = await saveCustomFonts(customFonts);
+        setSavedSettings((prev) => ({ ...prev, customFonts: savedCustomFonts }));
+        setTempSettings((prev) => ({
+            ...prev,
+            customFonts: savedCustomFonts,
+            fontFamily: parsedAddFont.value,
+        }));
+        closeAddFontDialog();
+        toast.success(`${parsedAddFont.label} added`);
+    };
+    const handleDeleteCustomFont = async (fontValue: CustomFontFamily) => {
+        const customFonts = (tempSettings.customFonts || []).filter((font) => font.value !== fontValue);
+        const savedCustomFonts = await saveCustomFonts(customFonts);
+        const shouldResetSavedFont = savedSettings.fontFamily === fontValue;
+        const shouldResetTempFont = tempSettings.fontFamily === fontValue;
+        const nextSavedSettings: SettingsType = {
+            ...savedSettings,
+            customFonts: savedCustomFonts,
+            fontFamily: shouldResetSavedFont ? "google-sans" : savedSettings.fontFamily,
+        };
+        setSavedSettings(nextSavedSettings);
+        setTempSettings((prev) => ({
+            ...prev,
+            customFonts: savedCustomFonts,
+            fontFamily: shouldResetTempFont ? "google-sans" : prev.fontFamily,
+        }));
+        if (shouldResetSavedFont) {
+            await saveSettings(nextSavedSettings);
+        }
+        toast.success("Font deleted");
+    };
     const handleTidalQualityChange = async (value: "LOSSLESS" | "HI_RES_LOSSLESS") => {
         setTempSettings((prev) => ({ ...prev, tidalQuality: value }));
     };
     const handleQobuzQualityChange = (value: "6" | "7" | "27") => {
         setTempSettings((prev) => ({ ...prev, qobuzQuality: value }));
     };
+    const handleAmazonQualityChange = (value: "16" | "24") => {
+        setTempSettings((prev) => ({ ...prev, amazonQuality: value }));
+    };
     const handleAutoQualityChange = async (value: "16" | "24") => {
         setTempSettings((prev) => ({ ...prev, autoQuality: value }));
     };
-    const [activeTab, setActiveTab] = useState<"general" | "files" | "api">("general");
+    const persistCustomTidalApi = useCallback(async (nextValue: string) => {
+        const normalizedValue = nextValue.trim().replace(/\/+$/g, "");
+        const persistedSettings = getSettings();
+        const nextSavedSettings: SettingsType = {
+            ...persistedSettings,
+            customTidalApi: normalizedValue,
+        };
+        await saveSettings(nextSavedSettings);
+        const nextSavedState = getSettings();
+        setSavedSettings(nextSavedState);
+        setTempSettings((prev) => ({
+            ...prev,
+            customTidalApi: nextSavedState.customTidalApi,
+        }));
+    }, []);
+    const persistCustomQobuzApi = useCallback(async (nextValue: string) => {
+        const normalizedValue = nextValue.trim().replace(/\/+$/g, "");
+        const persistedSettings = getSettings();
+        const nextSavedSettings: SettingsType = {
+            ...persistedSettings,
+            customQobuzApi: normalizedValue,
+        };
+        await saveSettings(nextSavedSettings);
+        const nextSavedState = getSettings();
+        setSavedSettings(nextSavedState);
+        setTempSettings((prev) => ({
+            ...prev,
+            customQobuzApi: nextSavedState.customQobuzApi,
+        }));
+    }, []);
+    const handleCheckCustomTidalApi = async () => {
+        const normalizedCustomTidalApi = (tempSettings.customTidalApi || "").trim().replace(/\/+$/g, "");
+        if (!normalizedCustomTidalApi.startsWith("https://")) {
+            toast.error("Enter a valid HTTPS HiFi API URL");
+            return;
+        }
+        setCustomTidalApiStatus("checking");
+        try {
+            const isOnline = await CheckCustomTidalAPI(normalizedCustomTidalApi);
+            setCustomTidalApiStatus(isOnline ? "online" : "offline");
+            if (isOnline) {
+                toast.success("HiFi API instance is online");
+            }
+            else {
+                toast.error("HiFi API instance is offline");
+            }
+        }
+        catch (error) {
+            console.error("Failed to check custom Tidal API:", error);
+            setCustomTidalApiStatus("offline");
+            toast.error(`Failed to check HiFi API instance: ${error}`);
+        }
+    };
+    const handleCheckCustomQobuzApi = async () => {
+        const normalizedCustomQobuzApi = (tempSettings.customQobuzApi || "").trim().replace(/\/+$/g, "");
+        if (!normalizedCustomQobuzApi.startsWith("https://")) {
+            toast.error("Enter a valid HTTPS Qobuz-DL instance URL");
+            return;
+        }
+        setCustomQobuzApiStatus("checking");
+        try {
+            const isOnline = await CheckCustomQobuzAPI(normalizedCustomQobuzApi);
+            setCustomQobuzApiStatus(isOnline ? "online" : "offline");
+            if (isOnline) {
+                toast.success("Qobuz-DL instance is online");
+            }
+            else {
+                toast.error("Qobuz-DL instance is offline");
+            }
+        }
+        catch (error) {
+            console.error("Failed to check custom Qobuz API:", error);
+            setCustomQobuzApiStatus("offline");
+            toast.error(`Failed to check Qobuz-DL instance: ${error}`);
+        }
+    };
+    const [activeTab, setActiveTab] = useState<"general" | "download" | "files" | "metadata" | "status">("general");
     return (<div className="space-y-4 h-full flex flex-col">
       <div className="flex items-center justify-between shrink-0">
         <h1 className="text-2xl font-bold">Settings</h1>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={async () => { try {
-        await OpenConfigFolder();
-    }
-    catch (e) {
-        toast.error(`Failed to open config folder: ${e}`);
-    } }} className="gap-1.5">
+          <Button variant="outline" onClick={async () => {
+            try {
+                await OpenConfigFolder();
+            }
+            catch (e) {
+                toast.error(`Failed to open config folder: ${e}`);
+            }
+        }} className="gap-1.5">
             <FolderLock className="h-4 w-4"/>
             Open Config Folder
           </Button>
@@ -155,33 +293,27 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
           <MonitorCog className="h-4 w-4"/>
           General
         </Button>
+        <Button variant={activeTab === "download" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("download")} className="rounded-b-none gap-2">
+          <Download className="h-4 w-4"/>
+          Download
+        </Button>
         <Button variant={activeTab === "files" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("files")} className="rounded-b-none gap-2">
           <FolderCog className="h-4 w-4"/>
-          File Management
+          Files
         </Button>
-        <Button variant={activeTab === "api" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("api")} className="rounded-b-none gap-2">
+        <Button variant={activeTab === "metadata" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("metadata")} className="rounded-b-none gap-2">
+          <Tags className="h-4 w-4"/>
+          Metadata
+        </Button>
+        <Button variant={activeTab === "status" ? "default" : "ghost"} size="sm" onClick={() => setActiveTab("status")} className="rounded-b-none gap-2">
           <Router className="h-4 w-4"/>
-          API Status
+          Status
         </Button>
       </div>
 
       <div className="flex-1 overflow-y-auto pt-4">
-        {activeTab === "general" && (<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {activeTab === "general" && (<div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="download-path">Download Path</Label>
-                <div className="flex gap-2">
-                  <InputWithContext id="download-path" value={tempSettings.downloadPath} onChange={(e) => setTempSettings((prev) => ({
-                ...prev,
-                downloadPath: e.target.value,
-            }))} placeholder="C:\Users\YourUsername\Music"/>
-                  <Button type="button" onClick={handleBrowseFolder} className="gap-1.5">
-                    <FolderOpen className="h-4 w-4"/>
-                    Browse
-                  </Button>
-                </div>
-              </div>
-
               <div className="space-y-2">
                 <Label htmlFor="theme-mode">Mode</Label>
                 <Select value={tempSettings.themeMode} onValueChange={(value: "auto" | "light" | "dark") => setTempSettings((prev) => ({ ...prev, themeMode: value }))}>
@@ -216,21 +348,44 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                   </SelectContent>
                 </Select>
               </div>
+            </div>
 
+            <div className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="font">Font</Label>
-                <Select value={tempSettings.fontFamily} onValueChange={(value: FontFamily) => setTempSettings((prev) => ({ ...prev, fontFamily: value }))}>
-                  <SelectTrigger id="font">
-                    <SelectValue placeholder="Select a font"/>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FONT_OPTIONS.map((font) => (<SelectItem key={font.value} value={font.value}>
-                        <span style={{ fontFamily: font.fontFamily }}>
-                          {font.label}
-                        </span>
-                      </SelectItem>))}
-                  </SelectContent>
-                </Select>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select value={tempSettings.fontFamily} onValueChange={(value: FontFamily) => setTempSettings((prev) => ({ ...prev, fontFamily: value }))}>
+                    <SelectTrigger id="font" className="max-w-full min-w-40">
+                      <SelectValue placeholder="Select a font"/>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {fontOptions.map((font) => {
+                const isCustomFont = font.value.startsWith("custom-");
+                return (<SelectItem key={font.value} value={font.value} indicatorPosition="inline" trailingAction={isCustomFont ? (<Button type="button" variant="ghost" size="icon" className="h-8 w-8 cursor-pointer text-muted-foreground hover:bg-transparent hover:text-destructive" aria-label={`Delete ${font.label}`} onPointerDown={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }} onPointerUp={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }} onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            void handleDeleteCustomFont(font.value as CustomFontFamily);
+                        }}>
+                              <Trash2 className="h-3.5 w-3.5 text-inherit"/>
+                            </Button>) : undefined}>
+                          <span style={{ fontFamily: font.fontFamily }}>
+                            {font.label}
+                          </span>
+                        </SelectItem>);
+            })}
+                    </SelectContent>
+                  </Select>
+                  <Button type="button" variant="outline" onClick={() => setShowAddFontDialog(true)} className="shrink-0 gap-1.5">
+                    <Plus className="h-4 w-4"/>
+                    Add Font
+                  </Button>
+                </div>
               </div>
 
               <div className="flex items-center gap-3 pt-2">
@@ -243,12 +398,66 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                 </Label>
               </div>
             </div>
+          </div>)}
 
-            <div className="space-y-4">
+        {activeTab === "download" && (<div className="grid grid-cols-1 lg:grid-cols-2 lg:gap-8 items-start">
+            <div className="space-y-4 lg:pr-8 lg:border-r">
+              <div className="space-y-2">
+                <Label htmlFor="link-resolver">Link Resolver</Label>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <Select value={tempSettings.linkResolver} onValueChange={(value: "songstats" | "songlink") => setTempSettings((prev) => ({
+                ...prev,
+                linkResolver: value,
+            }))}>
+                    <SelectTrigger id="link-resolver" className="h-9 w-fit min-w-35">
+                      <SelectValue placeholder="Select a link resolver"/>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="songlink">
+                        <span className="flex items-center gap-2">
+                          <SonglinkIcon className="h-4 w-4 shrink-0"/>
+                          Songlink
+                        </span>
+                      </SelectItem>
+                      <SelectItem value="songstats">
+                        <span className="flex items-center gap-2">
+                          <SongstatsIcon className="h-4 w-4 shrink-0"/>
+                          Songstats
+                        </span>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 pt-2">
+                <Switch id="allow-link-resolver-fallback" checked={tempSettings.allowResolverFallback} onCheckedChange={(checked) => setTempSettings((prev) => ({
+                ...prev,
+                allowResolverFallback: checked,
+            }))}/>
+                <Label htmlFor="allow-link-resolver-fallback" className="text-sm font-normal cursor-pointer">
+                  Allow Resolver Fallback
+                </Label>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <Label className="text-base font-semibold">Community</Label>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help"/>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      <p className="text-xs whitespace-nowrap">1 track / 30s</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="downloader">Source</Label>
-                <div className="flex gap-2 flex-wrap">
-                  <Select value={tempSettings.downloader} onValueChange={(value: any) => setTempSettings((prev) => ({
+                <div className="flex items-center gap-3 flex-wrap">
+                  <Select value={effectiveDownloader} onValueChange={(value: SettingsType["downloader"]) => setTempSettings((prev) => ({
                 ...prev,
                 downloader: value,
             }))}>
@@ -258,126 +467,122 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                     <SelectContent>
                       <SelectItem value="auto">Auto</SelectItem>
                       <SelectItem value="tidal">
-                        <span className="flex items-center">
+                        <span className="flex items-center gap-2">
                           <TidalIcon />
                           Tidal
                         </span>
                       </SelectItem>
                       <SelectItem value="qobuz">
-                        <span className="flex items-center">
+                        <span className="flex items-center gap-2">
                           <QobuzIcon />
                           Qobuz
                         </span>
                       </SelectItem>
                       <SelectItem value="amazon">
-                        <span className="flex items-center">
+                        <span className="flex items-center gap-2">
                           <AmazonIcon />
                           Amazon Music
                         </span>
                       </SelectItem>
-
                     </SelectContent>
                   </Select>
 
-                  {tempSettings.downloader === "auto" && (<>
-                      <Select value={tempSettings.autoOrder || "tidal-qobuz-amazon"} onValueChange={(value: any) => setTempSettings((prev) => ({
+                  {effectiveDownloader === "auto" && (<>
+                      <Select value={effectiveAutoOrder} onValueChange={(value: string) => setTempSettings((prev) => ({
                     ...prev,
                     autoOrder: value,
                 }))}>
-                        <SelectTrigger className="h-9 w-fit min-w-[140px]">
+                        <SelectTrigger className="h-9 w-auto">
                           <SelectValue />
                         </SelectTrigger>
-                        <SelectContent>
-                          
+                        <SelectContent className="w-fit min-w-max">
                           <SelectItem value="tidal-qobuz-amazon">
-                            <span className="flex items-center gap-1.5">
-                              <TidalIcon className="fill-current"/>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                              <QobuzIcon className="fill-current"/>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                              <AmazonIcon className="fill-current"/>
-                            </span>
-                          </SelectItem>
-                          <SelectItem value="tidal-amazon-qobuz">
-                            <span className="flex items-center gap-1.5">
-                              <TidalIcon className="fill-current"/>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                              <AmazonIcon className="fill-current"/>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                              <QobuzIcon className="fill-current"/>
-                            </span>
-                          </SelectItem>
-                          <SelectItem value="qobuz-tidal-amazon">
-                            <span className="flex items-center gap-1.5">
-                              <QobuzIcon className="fill-current"/>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                              <TidalIcon className="fill-current"/>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                              <AmazonIcon className="fill-current"/>
-                            </span>
-                          </SelectItem>
-                          <SelectItem value="qobuz-amazon-tidal">
-                            <span className="flex items-center gap-1.5">
-                              <QobuzIcon className="fill-current"/>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                              <AmazonIcon className="fill-current"/>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                              <TidalIcon className="fill-current"/>
-                            </span>
-                          </SelectItem>
-                          <SelectItem value="amazon-tidal-qobuz">
-                            <span className="flex items-center gap-1.5">
-                              <AmazonIcon className="fill-current"/>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                              <TidalIcon className="fill-current"/>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                              <QobuzIcon className="fill-current"/>
-                            </span>
-                          </SelectItem>
-                          <SelectItem value="amazon-qobuz-tidal">
-                            <span className="flex items-center gap-1.5">
-                              <AmazonIcon className="fill-current"/>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                              <QobuzIcon className="fill-current"/>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                              <TidalIcon className="fill-current"/>
-                            </span>
-                          </SelectItem>
-
-                          
-                          <SelectItem value="tidal-qobuz">
-                            <span className="flex items-center gap-1.5">
-                              <TidalIcon className="fill-current"/>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                              <QobuzIcon className="fill-current"/>
-                            </span>
-                          </SelectItem>
-                          <SelectItem value="tidal-amazon">
-                            <span className="flex items-center gap-1.5">
-                              <TidalIcon className="fill-current"/>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                              <AmazonIcon className="fill-current"/>
-                            </span>
-                          </SelectItem>
-                          <SelectItem value="qobuz-tidal">
-                            <span className="flex items-center gap-1.5">
-                              <QobuzIcon className="fill-current"/>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                              <TidalIcon className="fill-current"/>
-                            </span>
-                          </SelectItem>
+                                <span className="flex items-center gap-1.5">
+                                  <TidalIcon className="fill-current"/>
+                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
+                                  <QobuzIcon className="fill-current"/>
+                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
+                                  <AmazonIcon className="fill-current"/>
+                                </span>
+                              </SelectItem>
+                              <SelectItem value="tidal-amazon-qobuz">
+                                <span className="flex items-center gap-1.5">
+                                  <TidalIcon className="fill-current"/>
+                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
+                                  <AmazonIcon className="fill-current"/>
+                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
+                                  <QobuzIcon className="fill-current"/>
+                                </span>
+                              </SelectItem>
+                              <SelectItem value="qobuz-tidal-amazon">
+                                <span className="flex items-center gap-1.5">
+                                  <QobuzIcon className="fill-current"/>
+                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
+                                  <TidalIcon className="fill-current"/>
+                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
+                                  <AmazonIcon className="fill-current"/>
+                                </span>
+                              </SelectItem>
+                              <SelectItem value="qobuz-amazon-tidal">
+                                <span className="flex items-center gap-1.5">
+                                  <QobuzIcon className="fill-current"/>
+                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
+                                  <AmazonIcon className="fill-current"/>
+                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
+                                  <TidalIcon className="fill-current"/>
+                                </span>
+                              </SelectItem>
+                              <SelectItem value="amazon-tidal-qobuz">
+                                <span className="flex items-center gap-1.5">
+                                  <AmazonIcon className="fill-current"/>
+                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
+                                  <TidalIcon className="fill-current"/>
+                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
+                                  <QobuzIcon className="fill-current"/>
+                                </span>
+                              </SelectItem>
+                              <SelectItem value="amazon-qobuz-tidal">
+                                <span className="flex items-center gap-1.5">
+                                  <AmazonIcon className="fill-current"/>
+                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
+                                  <QobuzIcon className="fill-current"/>
+                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
+                                  <TidalIcon className="fill-current"/>
+                                </span>
+                              </SelectItem>
+                              <SelectItem value="tidal-qobuz">
+                                <span className="flex items-center gap-1.5">
+                                  <TidalIcon className="fill-current"/>
+                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
+                                  <QobuzIcon className="fill-current"/>
+                                </span>
+                              </SelectItem>
+                              <SelectItem value="tidal-amazon">
+                                <span className="flex items-center gap-1.5">
+                                  <TidalIcon className="fill-current"/>
+                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
+                                  <AmazonIcon className="fill-current"/>
+                                </span>
+                              </SelectItem>
+                              <SelectItem value="qobuz-tidal">
+                                <span className="flex items-center gap-1.5">
+                                  <QobuzIcon className="fill-current"/>
+                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
+                                  <TidalIcon className="fill-current"/>
+                                </span>
+                              </SelectItem>
+                              <SelectItem value="amazon-tidal">
+                                <span className="flex items-center gap-1.5">
+                                  <AmazonIcon className="fill-current"/>
+                                  <ArrowRight className="h-3 w-3 text-muted-foreground"/>
+                                  <TidalIcon className="fill-current"/>
+                                </span>
+                              </SelectItem>
                           <SelectItem value="qobuz-amazon">
                             <span className="flex items-center gap-1.5">
                               <QobuzIcon className="fill-current"/>
                               <ArrowRight className="h-3 w-3 text-muted-foreground"/>
                               <AmazonIcon className="fill-current"/>
-                            </span>
-                          </SelectItem>
-                          <SelectItem value="amazon-tidal">
-                            <span className="flex items-center gap-1.5">
-                              <AmazonIcon className="fill-current"/>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground"/>
-                              <TidalIcon className="fill-current"/>
                             </span>
                           </SelectItem>
                           <SelectItem value="amazon-qobuz">
@@ -401,19 +606,17 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                       </Select>
                     </>)}
 
-                  {tempSettings.downloader === "tidal" && (<Select value={tempSettings.tidalQuality} onValueChange={handleTidalQualityChange}>
-                      <SelectTrigger className="h-9 w-fit">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="LOSSLESS">16-bit/44.1kHz</SelectItem>
-                        <SelectItem value="HI_RES_LOSSLESS">
-                          24-bit/48kHz
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>)}
+                  {effectiveDownloader === "tidal" && (<Select value={tempSettings.tidalQuality} onValueChange={handleTidalQualityChange}>
+                        <SelectTrigger className="h-9 w-fit">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="LOSSLESS">16-bit/44.1kHz</SelectItem>
+                          <SelectItem value="HI_RES_LOSSLESS">24-bit/48kHz</SelectItem>
+                        </SelectContent>
+                      </Select>)}
 
-                  {tempSettings.downloader === "qobuz" && (<Select value={tempSettings.qobuzQuality} onValueChange={handleQobuzQualityChange}>
+                  {effectiveDownloader === "qobuz" && (<Select value={tempSettings.qobuzQuality} onValueChange={handleQobuzQualityChange}>
                       <SelectTrigger className="h-9 w-fit">
                         <SelectValue />
                       </SelectTrigger>
@@ -423,19 +626,25 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                       </SelectContent>
                     </Select>)}
 
-                  {tempSettings.downloader === "amazon" && (<div className="h-9 px-3 flex items-center text-sm font-medium border border-input rounded-md bg-muted/30 text-muted-foreground whitespace-nowrap cursor-default">
-                      16-bit - 24-bit/44.1kHz - 192kHz
-                    </div>)}
-
+                  {effectiveDownloader === "amazon" && (<Select value={tempSettings.amazonQuality} onValueChange={handleAmazonQualityChange}>
+                      <SelectTrigger className="h-9 w-fit">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="16">16-bit/44.1kHz</SelectItem>
+                        <SelectItem value="24">24-bit/48kHz - 192kHz</SelectItem>
+                      </SelectContent>
+                    </Select>)}
                 </div>
 
-                {((tempSettings.downloader === "tidal" &&
+                {((effectiveDownloader === "tidal" &&
                 tempSettings.tidalQuality === "HI_RES_LOSSLESS") ||
-                (tempSettings.downloader === "qobuz" &&
+                (effectiveDownloader === "qobuz" &&
                     tempSettings.qobuzQuality === "27") ||
-                (tempSettings.downloader === "auto" &&
+                (effectiveDownloader === "amazon" &&
+                    tempSettings.amazonQuality === "24") ||
+                (effectiveDownloader === "auto" &&
                     tempSettings.autoQuality === "24")) && (<div className="flex items-center gap-3 pt-2">
-                    <div className="flex items-center gap-3">
                       <Switch id="allow-fallback" checked={tempSettings.allowFallback} onCheckedChange={(checked) => setTempSettings((prev) => ({
                     ...prev,
                     allowFallback: checked,
@@ -443,55 +652,59 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                       <Label htmlFor="allow-fallback" className="text-sm font-normal cursor-pointer">
                         Allow Quality Fallback (16-bit)
                       </Label>
-                    </div>
                   </div>)}
               </div>
+            </div>
 
-              <div className="border-t pt-6"/>
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <Label className="text-base font-semibold">Custom</Label>
+              </div>
 
-              <div className="space-y-4">
-                <div className="flex items-center gap-3">
-                  <Switch id="embed-lyrics" checked={tempSettings.embedLyrics} onCheckedChange={(checked) => setTempSettings((prev) => ({
-                ...prev,
-                embedLyrics: checked,
-            }))}/>
-                  <Label htmlFor="embed-lyrics" className="cursor-pointer text-sm font-normal">
-                    Embed Lyrics
-                  </Label>
+              <div className="space-y-2">
+                <Label>Tidal</Label>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button type="button" variant="outline" onClick={() => setShowCustomTidalApiDialog(true)} className="gap-2">
+                    <TidalIcon />
+                    {tempSettings.customTidalApi ? "Change Instance" : "Add Instance"}
+                  </Button>
+                  {tempSettings.customTidalApi && (<span className="max-w-[260px] truncate text-xs text-muted-foreground" title={tempSettings.customTidalApi}>
+                      {tempSettings.customTidalApi}
+                    </span>)}
                 </div>
-                <div className="flex items-center gap-3">
-                  <Switch id="embed-max-quality-cover" checked={tempSettings.embedMaxQualityCover} onCheckedChange={(checked) => setTempSettings((prev) => ({
-                ...prev,
-                embedMaxQualityCover: checked,
-            }))}/>
-                  <Label htmlFor="embed-max-quality-cover" className="cursor-pointer text-sm font-normal">
-                    Embed Max Quality Cover
-                  </Label>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Qobuz</Label>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button type="button" variant="outline" onClick={() => setShowCustomQobuzApiDialog(true)} className="gap-2">
+                    <QobuzIcon />
+                    {tempSettings.customQobuzApi ? "Change Instance" : "Add Instance"}
+                  </Button>
+                  {tempSettings.customQobuzApi && (<span className="max-w-[260px] truncate text-xs text-muted-foreground" title={tempSettings.customQobuzApi}>
+                      {tempSettings.customQobuzApi}
+                    </span>)}
                 </div>
-                <div className="flex items-center gap-3">
-                  <Switch id="embed-genre" checked={tempSettings.embedGenre} onCheckedChange={(checked) => setTempSettings((prev) => ({
-                ...prev,
-                embedGenre: checked,
-            }))}/>
-                  <Label htmlFor="embed-genre" className="cursor-pointer text-sm font-normal">
-                    Embed Genre
-                  </Label>
-                </div>
-                {tempSettings.embedGenre && (<div className="flex items-center gap-3">
-                    <Switch id="use-single-genre" checked={tempSettings.useSingleGenre} onCheckedChange={(checked) => setTempSettings((prev) => ({
-                    ...prev,
-                    useSingleGenre: checked,
-                }))}/>
-                    <Label htmlFor="use-single-genre" className="text-sm cursor-pointer font-normal">
-                      Use Single Genre
-                    </Label>
-                  </div>)}
               </div>
             </div>
           </div>)}
 
-        {activeTab === "files" && (<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-4">
+        {activeTab === "files" && (<div className="grid grid-cols-1 lg:grid-cols-2 lg:gap-8 items-start">
+            <div className="space-y-4 lg:pr-8 lg:border-r">
+              <div className="space-y-2">
+                <Label htmlFor="download-path">Download Path</Label>
+                <div className="flex gap-2">
+                  <InputWithContext id="download-path" value={tempSettings.downloadPath} onChange={(e) => setTempSettings((prev) => ({
+                ...prev,
+                downloadPath: e.target.value,
+            }))} placeholder="C:\Users\YourUsername\Music"/>
+                  <Button type="button" onClick={handleBrowseFolder} className="gap-1.5">
+                    <FolderOpen className="h-4 w-4"/>
+                    Browse
+                  </Button>
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <Label className="text-sm">Folder Structure</Label>
@@ -543,7 +756,8 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                     .replace(/\{track\}/g, "01")
                     .replace(/\{disc\}/g, "1")
                     .replace(/\{year\}/g, "2018")
-                    .replace(/\{date\}/g, "2018-02-09")}
+                    .replace(/\{date\}/g, "2018-02-09")
+                    .replace(/\{isrc\}/g, "USUM71801234")}
                       /
                     </span>
                   </p>)}
@@ -560,6 +774,16 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
               </div>
 
               <div className="flex items-center gap-3">
+                <Switch id="playlist-owner-folder-name" checked={tempSettings.playlistOwnerFolderName} onCheckedChange={(checked) => setTempSettings((prev) => ({
+                ...prev,
+                playlistOwnerFolderName: checked,
+            }))}/>
+                <Label htmlFor="playlist-owner-folder-name" className="text-sm cursor-pointer font-normal">
+                  Playlist Owner Folder Name
+                </Label>
+              </div>
+
+              <div className="flex items-center gap-3">
                 <Switch id="create-m3u8-file" checked={tempSettings.createM3u8File} onCheckedChange={(checked) => setTempSettings((prev) => ({
                 ...prev,
                 createM3u8File: checked,
@@ -568,37 +792,42 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                   Create M3U8 Playlist File
                 </Label>
               </div>
-
-              <div className="flex items-center gap-3">
-                <Switch id="use-first-artist-only" checked={tempSettings.useFirstArtistOnly} onCheckedChange={(checked) => setTempSettings((prev) => ({
-                ...prev,
-                useFirstArtistOnly: checked,
-            }))}/>
-                <Label htmlFor="use-first-artist-only" className="text-sm cursor-pointer font-normal">
-                  Use First Artist Only
-                </Label>
-              </div>
-
-
             </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Label className="text-sm">Filename Format</Label>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help"/>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">
-                    <p className="text-xs whitespace-nowrap">
-                      Variables:{" "}
-                      {TEMPLATE_VARIABLES.map((v) => v.key).join(", ")}
-                    </p>
-                  </TooltipContent>
-                </Tooltip>
+            <div className="space-y-4 lg:pl-0">
+              <div className="space-y-2">
+                <Label htmlFor="existing-file-check-mode">Existing File Check</Label>
+                <Select value={tempSettings.existingFileCheckMode} onValueChange={(value: ExistingFileCheckMode) => setTempSettings((prev) => ({
+                ...prev,
+                existingFileCheckMode: value,
+            }))}>
+                  <SelectTrigger id="existing-file-check-mode">
+                    <SelectValue placeholder="Select existing file check mode"/>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="filename">Filename</SelectItem>
+                    <SelectItem value="isrc">ISRC</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="flex gap-2">
-                <Select value={tempSettings.filenamePreset} onValueChange={(value: FilenamePreset) => {
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm">Filename Format</Label>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help"/>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      <p className="text-xs whitespace-nowrap">
+                        Variables:{" "}
+                        {TEMPLATE_VARIABLES.map((v) => v.key).join(", ")}
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="flex gap-2">
+                  <Select value={tempSettings.filenamePreset} onValueChange={(value: FilenamePreset) => {
                 const preset = FILENAME_PRESETS[value];
                 setTempSettings((prev) => ({
                     ...prev,
@@ -608,42 +837,24 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                         : preset.template,
                 }));
             }}>
-                  <SelectTrigger className="h-9 w-fit">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(FILENAME_PRESETS).map(([key, { label }]) => (<SelectItem key={key} value={key}>
-                          {label}
-                        </SelectItem>))}
-                  </SelectContent>
-                </Select>
-                {tempSettings.filenamePreset === "custom" && (<InputWithContext value={tempSettings.filenameTemplate} onChange={(e) => setTempSettings((prev) => ({
-                    ...prev,
-                    filenameTemplate: e.target.value,
-                }))} placeholder="{track}. {title}" className="h-9 text-sm flex-1"/>)}
-              </div>
-              <div className="space-y-2 pt-2">
-                <Label className="text-sm">Separator</Label>
-                <div className="flex gap-2">
-                  <Select value={tempSettings.separator} onValueChange={(value: "comma" | "semicolon") => setTempSettings((prev) => ({
-                ...prev,
-                separator: value,
-            }))}>
                     <SelectTrigger className="h-9 w-fit">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="comma">Comma (,)</SelectItem>
-                      <SelectItem value="semicolon">Semicolon (;)</SelectItem>
+                      {Object.entries(FILENAME_PRESETS).map(([key, { label }]) => (<SelectItem key={key} value={key}>
+                            {label}
+                          </SelectItem>))}
                     </SelectContent>
                   </Select>
+                  {tempSettings.filenamePreset === "custom" && (<InputWithContext value={tempSettings.filenameTemplate} onChange={(e) => setTempSettings((prev) => ({
+                    ...prev,
+                    filenameTemplate: e.target.value,
+                }))} placeholder="{track}. {title}" className="h-9 text-sm flex-1"/>)}
                 </div>
-              </div>
-
-              {tempSettings.filenameTemplate && (<p className="text-xs text-muted-foreground">
-                  Preview:{" "}
-                  <span className="font-mono">
-                    {tempSettings.filenameTemplate
+                {tempSettings.filenameTemplate && (<p className="text-xs text-muted-foreground">
+                    Preview:{" "}
+                    <span className="font-mono">
+                      {tempSettings.filenameTemplate
                     .replace(/\{artist\}/g, tempSettings.separator === "comma" ? "Kendrick Lamar, SZA" : "Kendrick Lamar; SZA")
                     .replace(/\{album_artist\}/g, "Kendrick Lamar")
                     .replace(/\{album\}/g, "Black Panther")
@@ -651,16 +862,250 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
                     .replace(/\{track\}/g, "01")
                     .replace(/\{disc\}/g, "1")
                     .replace(/\{year\}/g, "2018")
-                    .replace(/\{date\}/g, "2018-02-09")}
+                    .replace(/\{date\}/g, "2018-02-09")
+                    .replace(/\{isrc\}/g, "USUM71801234")}
                     .flac
                   </span>
                 </p>)}
-                
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm">Separator</Label>
+                <Select value={tempSettings.separator} onValueChange={(value: "comma" | "semicolon") => setTempSettings((prev) => ({
+                ...prev,
+                separator: value,
+            }))}>
+                  <SelectTrigger className="h-9 w-fit">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="comma">Comma (,)</SelectItem>
+                    <SelectItem value="semicolon">Semicolon (;)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <Switch id="redownload-with-suffix" checked={tempSettings.redownloadWithSuffix} onCheckedChange={(checked) => setTempSettings((prev) => ({
+                ...prev,
+                redownloadWithSuffix: checked,
+            }))}/>
+                <Label htmlFor="redownload-with-suffix" className="text-sm cursor-pointer font-normal">
+                  Redownload With Suffix
+                </Label>
+              </div>
             </div>
           </div>)}
-        
-        {activeTab === "api" && (<ApiStatusTab />)}
+
+        {activeTab === "metadata" && (<div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <Switch id="embed-lyrics" checked={tempSettings.embedLyrics} onCheckedChange={(checked) => setTempSettings((prev) => ({
+                ...prev,
+                embedLyrics: checked,
+            }))}/>
+                <Label htmlFor="embed-lyrics" className="cursor-pointer text-sm font-normal">
+                  Embed Lyrics
+                </Label>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <Switch id="embed-max-quality-cover" checked={tempSettings.embedMaxQualityCover} onCheckedChange={(checked) => setTempSettings((prev) => ({
+                ...prev,
+                embedMaxQualityCover: checked,
+            }))}/>
+                <Label htmlFor="embed-max-quality-cover" className="cursor-pointer text-sm font-normal">
+                  Embed Max Quality Cover
+                </Label>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <Switch id="embed-genre" checked={tempSettings.embedGenre} onCheckedChange={(checked) => setTempSettings((prev) => ({
+                ...prev,
+                embedGenre: checked,
+            }))}/>
+                <Label htmlFor="embed-genre" className="cursor-pointer text-sm font-normal">
+                  Embed Genre
+                </Label>
+              </div>
+
+              {tempSettings.embedGenre && (<div className="flex items-center gap-3">
+                  <Switch id="use-single-genre" checked={tempSettings.useSingleGenre} onCheckedChange={(checked) => setTempSettings((prev) => ({
+                    ...prev,
+                    useSingleGenre: checked,
+                }))}/>
+                  <Label htmlFor="use-single-genre" className="text-sm cursor-pointer font-normal">
+                    Use Single Genre
+                  </Label>
+                </div>)}
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <Switch id="use-first-artist-only" checked={tempSettings.useFirstArtistOnly} onCheckedChange={(checked) => setTempSettings((prev) => ({
+                ...prev,
+                useFirstArtistOnly: checked,
+            }))}/>
+                <Label htmlFor="use-first-artist-only" className="text-sm cursor-pointer font-normal">
+                  Use First Artist Only
+                </Label>
+              </div>
+            </div>
+          </div>)}
+
+        {activeTab === "status" && (<ApiStatusTab />)}
       </div>
+
+      <Dialog open={showAddFontDialog} onOpenChange={(open) => open ? setShowAddFontDialog(true) : closeAddFontDialog()}>
+        <DialogContent className="sm:max-w-115 [&>button]:hidden">
+          <DialogHeader>
+            <div className="flex items-center justify-between gap-3">
+              <DialogTitle>Add Font</DialogTitle>
+              <button type="button" onClick={() => openExternal("https://fonts.google.com")} className="inline-flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
+                Open Google Fonts
+                <ExternalLink className="h-3 w-3"/>
+              </button>
+            </div>
+            <DialogDescription />
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="google-font-url">Google Font URL</Label>
+              <Input id="google-font-url" value={addFontUrl} onChange={(event) => setAddFontUrl(event.target.value)} onKeyDown={(event) => {
+            if (event.key === "Enter" && parsedAddFont) {
+                void handleAddFont();
+            }
+        }} placeholder="https://fonts.google.com/specimen/Ubuntu" autoFocus/>
+              {addFontUrl.trim() && !parsedAddFont && (<p className="text-xs text-destructive">
+                  Enter a valid Google Fonts URL.
+                </p>)}
+            </div>
+            <div className="rounded-md border bg-muted/20 p-4">
+              <p className="mb-2 text-xs font-medium text-muted-foreground">
+                Preview
+              </p>
+              <p className="text-2xl font-semibold leading-tight" style={{ fontFamily: parsedAddFont?.fontFamily }}>
+                Aa The quick brown fox
+              </p>
+              <p className="mt-2 text-sm text-muted-foreground" style={{ fontFamily: parsedAddFont?.fontFamily }}>
+                Kendrick Lamar - All The Stars
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeAddFontDialog}>
+              Cancel
+            </Button>
+            <Button onClick={() => void handleAddFont()} disabled={!parsedAddFont}>
+              Add
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showCustomTidalApiDialog} onOpenChange={setShowCustomTidalApiDialog}>
+        <DialogContent className="sm:max-w-md [&>button]:hidden">
+          <DialogHeader>
+            <div className="flex items-center justify-between gap-3">
+              <DialogTitle>Tidal Source</DialogTitle>
+              <button type="button" onClick={() => openExternal("https://github.com/binimum/hifi-api")} className="inline-flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
+                How do I create one?
+                <ExternalLink className="h-3 w-3"/>
+              </button>
+            </div>
+            <DialogDescription />
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="custom-tidal-api">Instance URL</Label>
+              <div className="flex gap-2">
+                <Input id="custom-tidal-api" type="url" value={tempSettings.customTidalApi || ""} onChange={(e) => {
+            const nextValue = e.target.value.replace(/\/+$/g, "");
+            setCustomTidalApiStatus("idle");
+            void persistCustomTidalApi(nextValue);
+        }} placeholder="https://your-hifi-api.example"/>
+                <Button type="button" variant="outline" className="gap-2" onClick={() => void handleCheckCustomTidalApi()} disabled={!((tempSettings.customTidalApi || "").trim().startsWith("https://")) || customTidalApiStatus === "checking"}>
+                  {customTidalApiStatus === "checking" ? "Checking..." : <><PlugZap className="h-4 w-4"/>Check</>}
+                </Button>
+                {tempSettings.customTidalApi && (<Button type="button" variant="outline" size="icon" onClick={() => {
+                setCustomTidalApiStatus("idle");
+                void persistCustomTidalApi("");
+            }}>
+                    <Trash2 className="h-4 w-4 text-destructive"/>
+                  </Button>)}
+              </div>
+            </div>
+            {customTidalApiStatus !== "idle" && (<p className={`text-xs ${customTidalApiStatus === "online"
+                ? "text-green-600 dark:text-green-400"
+                : customTidalApiStatus === "offline"
+                    ? "text-destructive"
+                    : "text-muted-foreground"}`}>
+                {customTidalApiStatus === "online"
+                ? "Custom HiFi API instance is online."
+                : customTidalApiStatus === "offline"
+                    ? "Custom HiFi API instance is offline or returned preview-only data."
+                    : "Checking custom HiFi API instance..."}
+              </p>)}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCustomTidalApiDialog(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showCustomQobuzApiDialog} onOpenChange={setShowCustomQobuzApiDialog}>
+        <DialogContent className="sm:max-w-md [&>button]:hidden">
+          <DialogHeader>
+            <div className="flex items-center justify-between gap-3">
+              <DialogTitle>Qobuz Source</DialogTitle>
+              <button type="button" onClick={() => openExternal("https://github.com/QobuzDL/Qobuz-DL")} className="inline-flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
+                How do I create one?
+                <ExternalLink className="h-3 w-3"/>
+              </button>
+            </div>
+            <DialogDescription />
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="custom-qobuz-api">Instance URL</Label>
+              <div className="flex gap-2">
+                <Input id="custom-qobuz-api" type="url" value={tempSettings.customQobuzApi || ""} onChange={(e) => {
+            const nextValue = e.target.value.replace(/\/+$/g, "");
+            setCustomQobuzApiStatus("idle");
+            void persistCustomQobuzApi(nextValue);
+        }} placeholder="https://your-qobuz-dl.example"/>
+                <Button type="button" variant="outline" className="gap-2" onClick={() => void handleCheckCustomQobuzApi()} disabled={!((tempSettings.customQobuzApi || "").trim().startsWith("https://")) || customQobuzApiStatus === "checking"}>
+                  {customQobuzApiStatus === "checking" ? "Checking..." : <><PlugZap className="h-4 w-4"/>Check</>}
+                </Button>
+                {tempSettings.customQobuzApi && (<Button type="button" variant="outline" size="icon" onClick={() => {
+                setCustomQobuzApiStatus("idle");
+                void persistCustomQobuzApi("");
+            }}>
+                    <Trash2 className="h-4 w-4 text-destructive"/>
+                  </Button>)}
+              </div>
+            </div>
+            {customQobuzApiStatus !== "idle" && (<p className={`text-xs ${customQobuzApiStatus === "online"
+                ? "text-green-600 dark:text-green-400"
+                : customQobuzApiStatus === "offline"
+                    ? "text-destructive"
+                    : "text-muted-foreground"}`}>
+                {customQobuzApiStatus === "online"
+                ? "Custom Qobuz-DL instance is online."
+                : customQobuzApiStatus === "offline"
+                    ? "Custom Qobuz-DL instance is offline or returned no download URL."
+                    : "Checking custom Qobuz-DL instance..."}
+              </p>)}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCustomQobuzApiDialog(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
         <DialogContent className="max-w-md [&>button]:hidden">
@@ -668,7 +1113,7 @@ export function SettingsPage({ onUnsavedChangesChange, onResetRequest, }: Settin
             <DialogTitle>Reset to Default?</DialogTitle>
             <DialogDescription>
               This will reset all settings to their default values. Your custom
-              configurations will be lost.
+              font list will be kept.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
