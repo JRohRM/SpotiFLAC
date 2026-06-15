@@ -12,7 +12,7 @@ func ResolveTrackISRC(spotifyTrackID string) string {
 		return strings.ToUpper(strings.TrimSpace(cachedISRC))
 	}
 
-	client := NewSongLinkClient()
+	client := SharedSongLinkClient()
 	isrc, err := client.GetISRCDirect(spotifyTrackID)
 	if err != nil {
 		return ""

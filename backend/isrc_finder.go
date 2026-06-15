@@ -91,7 +91,7 @@ func GetSpotifyTrackIdentifiersDirect(spotifyTrackID string) (SpotifyTrackIdenti
 	}
 
 	if identifiers.ISRC == "" {
-		client := NewSongLinkClient()
+		client := SharedSongLinkClient()
 		isrc, resolvedTrackID, soundplateErr := client.lookupSpotifyISRCViaSoundplate(normalizedTrackID)
 		if soundplateErr == nil && isrc != "" {
 			identifiers.ISRC = isrc

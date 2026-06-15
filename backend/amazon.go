@@ -30,7 +30,7 @@ func NewAmazonDownloader() *AmazonDownloader {
 
 func (a *AmazonDownloader) GetAmazonURLFromSpotify(spotifyTrackID string) (string, error) {
 	fmt.Println("Getting Amazon URL...")
-	client := NewSongLinkClient()
+	client := SharedSongLinkClient()
 	urls, err := client.GetAllURLsFromSpotify(spotifyTrackID, "")
 	if err != nil {
 		return "", fmt.Errorf("failed to get Amazon URL: %w", err)
