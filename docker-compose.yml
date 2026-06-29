@@ -1,9 +1,63 @@
 services:
+  # ── WireGuard tunnel ───────────────────────────────────────────────────────
+  # Owns the network namespace. spotiflac routes ALL its traffic through this,
+  # so every outbound request to Tidal/Qobuz/Amazon exits via the VPN IP and
+  # never hits the provider rate limits tied to the host's real address.
+  wireguard:
+    image: lscr.io/linuxserver/wireguard:latest
+    container_name: spotiflac-wireguard
+    restart: unless-stopped
+
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE          # only used if the host kernel lacks the wireguard module
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-UTC}
+      # Full wg0.conf, base64-encoded into a single line (Coolify-friendly: no
+      # file mount needed). Generate with:  base64 -w0 wg0.conf
+      WG_CONFIG_B64: ${WG_CONFIG_B64}
+
+    # Materialize the conf from the env var before the normal s6 init runs.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        mkdir -p /config/wg_confs
+        echo "$WG_CONFIG_B64" | base64 -d > /config/wg_confs/wg0.conf
+        chmod 600 /config/wg_confs/wg0.conf
+        exec /init
+
+    # NOTE: spotiflac shares this namespace and has no own network identity, so
+    # Traefik must route to THIS service (port ${PORT}) — not "spotiflac".
+    # No host port published; Traefik reaches it over the shared docker network.
+    # Put your Traefik labels / network on this service.
+
+    healthcheck:
+      # Tunnel is up once the wg interface exists.
+      test: ["CMD", "sh", "-c", "wg show | grep -q interface"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── SpotiFLAC API server ───────────────────────────────────────────────────
   spotiflac:
     build:
       dockerfile: Dockerfile
     container_name: spotiflac
     restart: unless-stopped
+
+    # Share the wireguard container's network stack: no own IP, no own ports.
+    network_mode: "service:wireguard"
+
+    depends_on:
+      wireguard:
+        condition: service_healthy
 
     environment:
       # ── Required ────────────────────────────────────────────────────────────

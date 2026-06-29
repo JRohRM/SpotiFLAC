@@ -1,0 +1,24 @@
+# WireGuard client config template for the SpotiFLAC tunnel.
+#
+# The container reads its config from the WG_CONFIG_B64 env var, NOT this file.
+# This file is just a convenient place to author the config, then encode it:
+#
+#   1. cp wireguard/wg0.conf.example wireguard/wg0.conf
+#   2. Replace every <...> with values from your VPN / WireGuard provider.
+#      (Mullvad, ProtonVPN, IVPN, AzireVPN, etc. hand you a ready-made config.)
+#   3. base64 -w0 wireguard/wg0.conf
+#   4. Paste the output into WG_CONFIG_B64 in .env (or Coolify's env editor).
+#
+# wg0.conf is gitignored — it holds your private key, never commit it.
+
+[Interface]
+PrivateKey = <your-client-private-key>
+Address    = <10.x.x.x/32>          # address the provider assigned you
+DNS        = <1.1.1.1>              # provider DNS (avoids DNS leaks)
+
+[Peer]
+PublicKey  = <server-public-key>
+Endpoint   = <vpn.example.com:51820>
+# Route ALL traffic through the tunnel so no request leaks the real IP.
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25

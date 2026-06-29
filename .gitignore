@@ -45,6 +45,10 @@ desktop.ini
 .env.local
 .env.*.local
 
+# WireGuard (contains private keys — never commit)
+wireguard/*.conf
+!wireguard/wg0.conf.example
+
 # Logs
 *.log
 logs/
