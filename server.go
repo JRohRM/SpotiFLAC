@@ -205,7 +205,7 @@ func runJob(store *jobStore, app *App, job *Job, service string, outputDir strin
 			AlbumArtist:        t.AlbumArtist,
 			ReleaseDate:        t.ReleaseDate,
 			CoverURL:           t.Images,
-			Duration:           t.DurationMs,
+			Duration:           (t.DurationMs + 500) / 1000, // ms → seconds (field is seconds)
 			OutputDir:          outputDir,
 			AudioFormat:        "LOSSLESS",
 			FilenameFormat:     "title-artist",
